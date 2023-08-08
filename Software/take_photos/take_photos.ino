@@ -165,14 +165,21 @@ void setup() {
 }
 
 void loop() {
+    digitalWrite(LED_BUILTIN,HIGH);
 
-    digitalWrite(A_input_1, HIGH);
+    digitalWrite(D0, HIGH);
 
-    digitalWrite(B_input_1, HIGH);
+    digitalWrite(D2, HIGH);
 
-    digitalWrite(A_input_0, LOW);
+    digitalWrite(D1, LOW);
 
-    digitalWrite(B_input_0, LOW);
+    digitalWrite(D3, LOW);
+
+    delay(100);
+
+        digitalWrite(LED_BUILTIN,LOW);
+
+delay(100);
 
 
   // Camera & SD available, start taking pictures
@@ -189,6 +196,8 @@ void loop() {
       Serial.println("Photos will begin in one second, please be ready.");
       imageCount++;
       lastCaptureTime = now;
+   
+         digitalWrite(LED_BUILTIN,LOW);
     }
   }
 }
