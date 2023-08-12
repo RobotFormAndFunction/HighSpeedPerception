@@ -165,6 +165,7 @@ void setup() {
 }
 
 void loop() {
+// added this block to test motor functionality
     digitalWrite(LED_BUILTIN,HIGH);
 
     digitalWrite(D0, HIGH);
@@ -177,9 +178,9 @@ void loop() {
 
     delay(100);
 
-        digitalWrite(LED_BUILTIN,LOW);
+    digitalWrite(LED_BUILTIN,LOW);
 
-delay(100);
+    delay(100);
 
 
   // Camera & SD available, start taking pictures
