@@ -6,20 +6,15 @@ Hardware and software for a high-speed vision-enabled millirobot
 
 ### Getting WiFi image server working
 
-After flashing the esp32s3 Sense with CameraWebServer, the following text should appear in the Serial Monitor:
+The UB Network currently does not support hosting the image server. A workaround for this issue has been developed using personal hotspots. In order to set this up,
 
-```
-load:0x403cc700,len:0x2a68
-entry 0x403c98d4
-Powering on
-MAC: AA:AA:AA:AA:AA:AA
-...............................
-```
-
-Go to: https://clearpass-portal1.cit.buffalo.edu/guest/mac_create.php
-
-Register the MAC address for the microrobot.
-These device registrations will last for one year.
+1. Turn on the hotspot on your mobile device and connect your laptop to it.
+1. Update the `ssid` and `password` constants in `CameraWebServer.ino` with the hotspot device ID and hotspot password.
+1. Flash the ESP32S3 board with the updated code.
+1. Open the Serial Monitor in Arduino IDE.
+1. Once the flash is complete, press `R` on the board to restart it.
+1. Wait for a message like `Camera Ready! Use 'http://123.45.67.89' to connect` to appear on the Serial Monitor.
+1. Visit the website in a browser.
 
 ## Debugging
 
