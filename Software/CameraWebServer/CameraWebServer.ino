@@ -43,7 +43,7 @@ void setupLedFlash(int pin);
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
-  Serial.println();
+  Serial.println("Powering on");
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -134,6 +134,24 @@ void setup() {
   WiFi.begin(ssid, password);
   WiFi.setSleep(false);
 
+  // report system MAC Address for registration with UB Devices
+  // https://www.arduino.cc/reference/en/libraries/wifi/wifi.macaddress/
+  byte mac[6];
+  WiFi.macAddress(mac);
+  Serial.print("MAC: ");
+  Serial.print(mac[5],HEX);
+  Serial.print(":");
+  Serial.print(mac[4],HEX);
+  Serial.print(":");
+  Serial.print(mac[3],HEX);
+  Serial.print(":");
+  Serial.print(mac[2],HEX);
+  Serial.print(":");
+  Serial.print(mac[1],HEX);
+  Serial.print(":");
+  Serial.println(mac[0],HEX);
+
+
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
@@ -150,5 +168,10 @@ void setup() {
 
 void loop() {
   // Do nothing. Everything is done in another task by the web server
-  delay(10000);
+  delay(100000);
+  if(WiFi.status() == WL_CONNECTED) {
+    Serial.print("Camera Ready! Use 'http://");
+    Serial.print(WiFi.localIP());
+    Serial.println("' to connect");
+  }
 }
