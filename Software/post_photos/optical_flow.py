@@ -81,18 +81,9 @@ def downsample(img):
 
     # smaller image
     simg = np.zeros((y1, x1), dtype=np.uint8)
-    for y in range(y1):
-        for x in range(x1):
-            for xi in range(gs):
-                for yi in range(gs):
-                    simg[y][x] += img[gs*y+yi][gs*x+xi] / (gs**2)
-
-    # print(img.shape)
-    # print(type(img[0][0]))
-    # print(img)
-
-    # print(simg.shape)
-    # print(simg)
+    for y in range(y2):
+        for x in range(x2):
+            simg[y//gs][x//gs] += img[y][x] / gs**2
 
     return simg
 
@@ -112,13 +103,13 @@ video = np.stack([
     img0, img1
 ])
 
-f = video[0]
+subsamples = [video[0]]
 
-for i in range(4):
-    cv2.imshow(f"frame 1, /{2**i}", f)
+for i in range(7):
+    cv2.imshow(f"frame 1, /{2**i}", subsamples[-1])
     cv2.waitKey(0)
     cv2.destroyAllWindows()
-    f = downsample(f)
+    subsamples.append(downsample(subsamples[-1]))
 
 # print(type(img))
 print(video.shape)
