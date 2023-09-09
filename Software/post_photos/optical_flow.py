@@ -3,12 +3,12 @@ import numpy as np
 import math
 
 
+# Computes (u,v)--> for an image patch
 def compute_patch_uv(video, W_x, W_y, W_t, W_l):
     # W_x: Starting index within W along the X axis
     # W_y: Starting index within W along the Y axis
     # W_t: Starting time step for the computation
     # W_l: Number of elements in W along the X and Y axes.  Assumed to be a square
-    # Computes (u,v)--> for an image patch
 
     # partials = []  # Initialize partial derivatives grid of triples
 
@@ -35,15 +35,24 @@ def compute_patch_uv(video, W_x, W_y, W_t, W_l):
         [Ixx, Ixy],
         [Ixy, Iyy]
     ])
+    # print("A:", A)
 
     ATB = np.array([
         -Ixt,
         -Iyt
     ])
 
+
     ATA = np.dot(A.T, A)
-    ATA_inv = np.linalg.inv(ATA)
-    U = np.dot(ATA_inv, ATB)
+    # print("ATA:", ATA)
+
+    det = np.linalg.det(ATA)
+
+    if det != 0:
+        ATA_inv = np.linalg.inv(ATA)
+        U = np.dot(ATA_inv, ATB)
+    else:
+        U = np.zeros((2,))   # Determinant is 0 -> no optical flow in the region
     return U
 
 
@@ -87,9 +96,24 @@ def downsample(img, gs=2):
 
 
 def compute_image_uv(img1, img2):
+    # Input: 2x (NxM) images
+    # Output: 2x NxM vectors u,v indicating x and y optical flow between frames 
     # Computes the optical flow UV difference between pixels in two images just at that scale of the pyramid
-    pass
+    Y,X = img1.shape
 
+    video = np.stack([img1, img2])
+
+    u = np.zeros((Y,X))
+    v = np.zeros((Y,X))
+
+    # -1 avoids going outside of the bounding boxes
+    for y in range(Y-1):
+        for x in range(X-1): 
+            U = compute_patch_uv(video, x, y, W_t=0, W_l=1)
+            u[y][x] = U[0]
+            v[y][x] = U[1]
+
+    return u,v
 
 def computeFlow(frame1, frame2):
     # start with the coarsest settings and work upwards
@@ -112,13 +136,13 @@ def computeFlow(frame1, frame2):
         cv2.destroyAllWindows()
         subsamples1.append(downsample(subsamples1[-1]))
         subsamples2.append(downsample(subsamples2[-1]))
+        print("Created frame of shape: ", subsamples1[-1].shape)
 
     # Starting with the smallest image, compute optical flow
     for i in range(max_divs, 0, -1):
-        compute_image_uv(subsamples1[i], subsamples2[i])
-
-
-
+        u,v = compute_image_uv(subsamples1[i], subsamples2[i])
+        print("U", u)
+        print("V", v)
 
 
 
