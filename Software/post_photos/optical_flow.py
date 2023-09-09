@@ -10,7 +10,7 @@ def compute_patch_uv(video, W_x, W_y, W_t, W_l):
     # W_l: Number of elements in W along the X and Y axes.  Assumed to be a square
     # Computes (u,v)--> for an image patch
 
-    partials = []  # Initialize partial derivatives grid of triples
+    # partials = []  # Initialize partial derivatives grid of triples
 
     Ixx = 0
     Ixy = 0
@@ -20,11 +20,11 @@ def compute_patch_uv(video, W_x, W_y, W_t, W_l):
     
     # Compute all necessary partials and sums
     for x in range(W_x, W_x+W_l):
-        partials.append([])
+        # partials.append([])
         for y in range(W_y, W_y+W_l):
             p = partial_d(video, x, y, W_t)
             ix, iy, it = p
-            partials[-1].append(p)
+            # partials[-1].append(p)
             Ixx += ix * ix 
             Ixy += ix * iy
             Iyy += iy * iy
@@ -42,11 +42,8 @@ def compute_patch_uv(video, W_x, W_y, W_t, W_l):
     ])
 
     ATA = np.dot(A.T, A)
-
     ATA_inv = np.linalg.inv(ATA)
-
     U = np.dot(ATA_inv, ATB)
-
     return U
 
 
@@ -72,9 +69,10 @@ def get_u_n(ix,iy,it):
 def euclidian(x,y):
     return (x**2 + y**2)**0.5
 
-def downsample(img):
+def downsample(img, gs=2):
+    # img = numpy 2d array of pixels representing a greyscale image
+    # gs = Grid size of single axis (2x2)
     # Downscales images in 2x2 grid pattern
-    gs = 2 # Grid size of single axis (2x2)
     y2,x2 = img.shape
     y1 = math.ceil(y2/gs)
     x1 = math.ceil(x2/gs)
@@ -88,29 +86,45 @@ def downsample(img):
     return simg
 
 
+def compute_image_uv(img1, img2):
+    # Computes the optical flow UV difference between pixels in two images just at that scale of the pyramid
+    pass
+
+
+def computeFlow(frame1, frame2):
+    # start with the coarsest settings and work upwards
+    X,Y = frame1.shape
+    
+    # The maximum amount of divisions that can be done before 
+    # the image dims are reduced to an elem of {2x2, 2xN, Nx2}
+    max_divs = int(math.log2(min(X,Y))) 
+
+    video = np.stack([
+        frame1, frame2
+    ])
+
+    subsamples1 = [frame1]
+    subsamples2 = [frame2]
+
+    for i in range(max_divs):
+        cv2.imshow(f"frame 1, /{2**i}", subsamples1[-1])
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        subsamples1.append(downsample(subsamples1[-1]))
+        subsamples2.append(downsample(subsamples2[-1]))
+
+    # Starting with the smallest image, compute optical flow
+    for i in range(max_divs, 0, -1):
+        compute_image_uv(subsamples1[i], subsamples2[i])
 
 
 
 
 
 
+img0 = cv2.imread('frame1.jpg',0)
+img1 = cv2.imread('frame2.jpg',0)
 
-
-img0 = cv2.imread('frame1.png',0)
-img1 = cv2.imread('frame2.png',0)
-
-video = np.stack([
-    img0, img1
-])
-
-subsamples = [video[0]]
-
-for i in range(7):
-    cv2.imshow(f"frame 1, /{2**i}", subsamples[-1])
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-    subsamples.append(downsample(subsamples[-1]))
 
 # print(type(img))
-print(video.shape)
-
+computeFlow(img0, img1)
