@@ -58,14 +58,12 @@ def compute_patch_uv(video, W_x, W_y, W_t, W_l):
 
 # Based on: https://www.youtube.com/watch?v=IjPLZ3hjU1A&list=PL2zRqk16wsdoYzrWStffqBAoUY8XdvatV&index=3
 def partial_d(video, x, y, t):
-    i_x = video[t][y][x+1] + video[t][y+1][x+1] + video[t+1][y][x+1] + video[t+1][y+1][x+1] - \
-         (video[t][y][x]   + video[t][y+1][x]   + video[t+1][y][x]   + video[t+1][y+1][x])
-    
-    i_y = video[t][y+1][x] + video[t][y+1][x+1] + video[t+1][y+1][x] + video[t+1][y+1][x+1] - \
-         (video[t][y][x]   + video[t][y][x+1]   + video[t+1][y][x]   + video[t+1][y][x+1])
-
-    i_t = video[t+1][y][x] + video[t+1][y+1][x] + video[t+1][y][x+1] + video[t+1][y+1][x+1] - \
-         (video[t][y][x]   + video[t][y+1][x]   + video[t][y][x+1]   + video[t][y+1][x+1])
+    i_x = (float(video[t][y][x+1]) + float(video[t][y+1][x+1]) + float(video[t+1][y][x+1]) + float(video[t+1][y+1][x+1])) - \
+          (float(video[t][y][x  ]) + float(video[t][y+1][x  ]) + float(video[t+1][y][x  ]) + float(video[t+1][y+1][x  ]))
+    i_y = (float(video[t][y+1][x]) + float(video[t][y+1][x+1]) + float(video[t+1][y+1][x]) + float(video[t+1][y+1][x+1])) - \
+          (float(video[t][y  ][x]) + float(video[t][y  ][x+1]) + float(video[t+1][y  ][x]) + float(video[t+1][y  ][x+1]))
+    i_t = (float(video[t+1][y][x]) + float(video[t+1][y+1][x]) + float(video[t+1][y][x+1]) + float(video[t+1][y+1][x+1])) - \
+          (float(video[t  ][y][x]) + float(video[t  ][y+1][x]) + float(video[t  ][y][x+1]) + float(video[t  ][y+1][x+1]))
 
     return (i_x/4, i_y/4, i_t/4)
 
@@ -117,11 +115,11 @@ def compute_image_uv(img1, img2):
 
 def computeFlow(frame1, frame2):
     # start with the coarsest settings and work upwards
-    X,Y = frame1.shape
+    Y,X = frame1.shape
     
     # The maximum amount of divisions that can be done before 
     # the image dims are reduced to an elem of {2x2, 2xN, Nx2}
-    max_divs = int(math.log2(min(X,Y))) 
+    max_divs = int(math.log2(min(X,Y))) # - 2   # -1 avoids actually operating on a 2x2 or 4x4 unit.  Minimum size is thus 8x8 = 64 pixels
 
     video = np.stack([
         frame1, frame2
@@ -135,14 +133,29 @@ def computeFlow(frame1, frame2):
         cv2.waitKey(0)
         cv2.destroyAllWindows()
         subsamples1.append(downsample(subsamples1[-1]))
-        subsamples2.append(downsample(subsamples2[-1]))
+        subsamples2.append(downsample(subsamples2[-1]))     
         print("Created frame of shape: ", subsamples1[-1].shape)
 
+    # Cumulative vector offsets in each direction
+    u_c = np.zeros((Y,X))
+    v_c = np.zeros(subsamples1[0].shape)
+
     # Starting with the smallest image, compute optical flow
-    for i in range(max_divs, 0, -1):
+    for i in range(max_divs, -1, -1):
         u,v = compute_image_uv(subsamples1[i], subsamples2[i])
-        print("U", u)
-        print("V", v)
+        # print("U", u.shape)
+        # print("V", v.shape)
+
+        # After computing the u,v at a higher level, use that information to modify the next layer down
+        sf = 2**i # scale factor (the factor by which source u,v need to be expanded ot the cumulative u,v)
+
+        for x in range(X):
+            for y in range(Y):
+                u_c[y][x] += u[y//sf][x//sf]    # Pull from the new u,v data to update global U,V vectors
+                v_c[y][x] += v[y//sf][x//sf]    # Pull from the new u,v data to update global U,V vectors
+
+        # Use the latest u,v information to offset parts of the next order down's image to try to get finer correlations from there
+        pass
 
 
 
