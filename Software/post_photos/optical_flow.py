@@ -2,6 +2,15 @@ import cv2
 import numpy as np
 import math
 
+import matplotlib.pyplot as plt
+
+def plotUV(U,V):
+    # print(U,V)
+    # https://matplotlib.org/stable/gallery/images_contours_and_fields/quiver_simple_demo.html#sphx-glr-gallery-images-contours-and-fields-quiver-simple-demo-py
+    fig, ax = plt.subplots()
+    q = ax.quiver(np.arange(U.shape[0]), np.arange(U.shape[1]), U, V)
+    plt.show()
+
 
 # Computes (u,v)--> for an image patch
 def compute_patch_uv(video, W_x, W_y, W_t, W_l):
@@ -130,7 +139,7 @@ def computeFlow(frame1, frame2):
 
     for i in range(max_divs):
         cv2.imshow(f"frame 1, /{2**i}", subsamples1[-1])
-        cv2.waitKey(0)
+        # cv2.waitKey(0)
         cv2.destroyAllWindows()
         subsamples1.append(downsample(subsamples1[-1]))
         subsamples2.append(downsample(subsamples2[-1]))     
@@ -142,21 +151,41 @@ def computeFlow(frame1, frame2):
 
     # Starting with the smallest image, compute optical flow
     for i in range(max_divs, -1, -1):
-        u,v = compute_image_uv(subsamples1[i], subsamples2[i])
+        sf = 2**i # scale factor (the factor by which source u,v need to be expanded ot the cumulative u,v)
+        print("Operating in patches of size {0}x{0}".format(sf))
+
+        # Use the latest cumulative u,v information to offset parts of this scale's image to try to get finer correlations from there
+        # Generate a new target to use instead of the original subsamples1[i]
+        updatedTarget = np.copy(subsamples1[i])
+        ts = updatedTarget.shape  # target shape
+        for x in range(X):
+            for y in range(Y):
+                u = u_c[y][x]
+                v = v_c[y][x]
+                _y = max(0, min(ts[0]-1, int((y+v)//sf)))
+                _x = max(0, min(ts[1]-1, int((x+u)//sf)))
+                updatedTarget[_y][_x] = subsamples1[i][y//sf][x//sf]
+
+        cv2.imshow(f"Updated frame at scale: {sf}", cv2.resize(updatedTarget,  (400,400), interpolation=cv2.INTER_NEAREST))
+        cv2.imshow(f"Time +1 frame at scale: {sf}", cv2.resize(subsamples2[i], (400,400), interpolation=cv2.INTER_NEAREST))
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+
+        u,v = compute_image_uv(updatedTarget, subsamples2[i])
         # print("U", u.shape)
         # print("V", v.shape)
 
         # After computing the u,v at a higher level, use that information to modify the next layer down
-        sf = 2**i # scale factor (the factor by which source u,v need to be expanded ot the cumulative u,v)
 
         for x in range(X):
             for y in range(Y):
-                u_c[y][x] += u[y//sf][x//sf]    # Pull from the new u,v data to update global U,V vectors
-                v_c[y][x] += v[y//sf][x//sf]    # Pull from the new u,v data to update global U,V vectors
+                u_c[y][x] += u[y//sf][x//sf] * sf    # Pull from the new u,v data to update global U,V vectors
+                v_c[y][x] += v[y//sf][x//sf] * sf    # Pull from the new u,v data to update global U,V vectors
 
-        # Use the latest u,v information to offset parts of the next order down's image to try to get finer correlations from there
-        pass
+        plotUV(u_c, v_c)
 
+    return u_c, v_c
 
 
 img0 = cv2.imread('frame1.jpg',0)
@@ -164,4 +193,5 @@ img1 = cv2.imread('frame2.jpg',0)
 
 
 # print(type(img))
-computeFlow(img0, img1)
+U,V = computeFlow(img0, img1)
+
