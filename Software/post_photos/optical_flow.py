@@ -157,11 +157,14 @@ def computeFlow(frame1, frame2):
         # Use the latest cumulative u,v information to offset parts of this scale's image to try to get finer correlations from there
         # Generate a new target to use instead of the original subsamples1[i]
         updatedTarget = np.copy(subsamples1[i])
-        ts = updatedTarget.shape  # target shape
+        ts = updatedTarget.shape  
         for x in range(X):
             for y in range(Y):
                 u = u_c[y][x]
                 v = v_c[y][x]
+
+                # Move the pixel data +(u,v) from the old location to the new location, bounded by the image dimensions
+                # During this write stage, all x,y,u,v values are divided by sf to scale for the shrunk image
                 _y = max(0, min(ts[0]-1, int((y+v)//sf)))
                 _x = max(0, min(ts[1]-1, int((x+u)//sf)))
                 updatedTarget[_y][_x] = subsamples1[i][y//sf][x//sf]
@@ -173,11 +176,9 @@ def computeFlow(frame1, frame2):
 
 
         u,v = compute_image_uv(updatedTarget, subsamples2[i])
-        # print("U", u.shape)
-        # print("V", v.shape)
 
         # After computing the u,v at a higher level, use that information to modify the next layer down
-
+        # Experimental edit { * sf}: tried scaling (u,v) by sf as correct results are not being produced
         for x in range(X):
             for y in range(Y):
                 u_c[y][x] += u[y//sf][x//sf] * sf    # Pull from the new u,v data to update global U,V vectors
