@@ -12,26 +12,6 @@ def plotUV(U,V):
     plt.show()
 
 
-
-def get_grid_ssds(img0, img1):
-    Y,X = img0.shape
-    patch_size = 5   # 5x5 pixel patches of the image
-    U = np.zeros((Y//patch_size, X//patch_size))
-    V = np.zeros((Y//patch_size, X//patch_size))
-
-    for y in range(0, Y-patch_size+1, patch_size):
-        for x in range(0, X-patch_size+1, patch_size):
-            patch0 = img0[y:y+patch_size, x:x+patch_size]
-            # print("Patch 0:", patch0.shape)
-
-            min_diff = 2**20  # some large number
-            u = min_diff
-            v = min_diff
-            # Scan for best match around the source point
-
-    return U, V
-
-
 def get_best_offset_for(patch1, img2, x,y,patch_size,search_area=8):
     Y,X = img2.shape
     best_u = 0
@@ -74,10 +54,6 @@ def ssd(patch1, patch2) -> tuple:
 img0 = cv2.imread('frame1.jpg',0)
 img1 = cv2.imread('frame2.jpg',0)
 
-
-# print(type(img))
-# U,V = get_grid_ssds(img0, img1)
-# plotUV(U,V)
 
 X=Y=96
 s=5
