@@ -14,13 +14,15 @@
 const int IMAGE_WIDTH = 320; // set the camera properties to this size in the configure file
 const int IMAGE_HEIGHT = 240; // set the camera properties to this size
 
-// Two-dimensional array to hold the pixel values
-uint8_t image2D[IMAGE_HEIGHT][IMAGE_WIDTH]; //two array to make a binary image file
+// two instances of Two-dimensional array to hold the pixel values at consecutive time points
+uint8_t image2D[2][IMAGE_HEIGHT][IMAGE_WIDTH]; //3 array to make a binary image file
+uint8_t t = 0;   // timestep of latest image to go into buffer
 #define THRESHOLD 150 //decimal threshold for white pixel
+uint8_t UVimage2D[IMAGE_HEIGHT][IMAGE_WIDTH][2]; // 3D array tracking the U and V values for each pixel of incoming frames
+
 
 // our call back to dump whatever we got in binary format, this is used with CoolTerm on my machine to capture an image
-size_t jpgCallBack(void * arg, size_t index, const void* data, size_t len)
-{
+size_t jpgCallBack(void * arg, size_t index, const void* data, size_t len) {
   uint8_t* basePtr = (uint8_t*) data;
   for (size_t i = 0; i < len; i++) {
     Serial.write(basePtr[i]);
@@ -28,6 +30,59 @@ size_t jpgCallBack(void * arg, size_t index, const void* data, size_t len)
   return 0;
 }
 
+float eigenvals[2];
+float * calculateEigenvals2x2(M00, M01, M10, M11){
+  
+}
+
+uint8_t deltas[3]; // tracks x,y,z values returned by partialD, overwrtiting the same memory with each function call
+uint8_t * partialD(uint8_t** f1,uint8_t** f2, uint8_t x, uint8_t y) {
+  /**
+  partial derivative over x,y,t between frames f1 and f2 at pixel coordinates (x,y)
+  */
+  deltas[0] /*x*/ = (f1[y][x+1] + f1[y+1][x+1] + f2[y][x+1] + f2[y+1][x+1]) - 
+                    (f1[y][x  ] + f1[y+1][x  ] + f2[y][x  ] + f2[y+1][x  ]);
+  deltas[1] /*y*/ = (f1[y+1][x] + f1[y+1][x+1] + f2[y+1][x] + f2[y+1][x+1]) - 
+                    (f1[y  ][x] + f1[y  ][x  ] + f2[y  ][x] + f2[y+1][x  ]);
+  deltas[2] /*t*/ = (f2[y ][x ] + f2[y+1][x  ] + f2[y][x+1] + f2[y+1][x+1]) - 
+                    (f1[y ][x ] + f1[y+1][x  ] + f1[y][x+1] + f1[y+1][x+1]);
+
+  return deltas;
+}
+
+uint8_t * cornerDetect(uint8_t** f1,uint8_t** f2) {
+    // Computes the pixels in the image that have high dx and dy gradients, making them likely corners
+    uint8_t window_size = 3;   // how many pixels (one axis length) to include in the summation for corner detection
+    // uint8_t os = window_size/2; // offset - halved to shift iteration point toward the center of the patch
+
+    for (int row = 0; row < IMAGE_HEIGHT - window_size; row++) {
+        for (int col = 0; col < IMAGE_WIDTH - window_size; col++) {
+            uint8_t M0, M1, M2; // track the sums: M0 -> Ix^2, M1 -> IxIy, M2 -> Iy^2
+            M0 = M1 = M2 = 0;
+            for (int y = row; y < row + window_size; y++) {
+              for (int x = col; x < col + window_size; x++) {
+                uint8_t *grad = partialD(f1, f2, x, y);  // I_x, I_y, I_t
+                M0 += grad[0] * grad[0];  // I_x ^2
+                M1 += grad[0] * grad[1];  // I_x * I_y
+                M2 += grad[1] * grad[1];  // I_y ^2
+              }
+            }
+
+            // determine eigenvalues from matrix M
+
+            // use the eigenvalues to determine partial derivatives
+            // todo
+        }
+    }
+
+    // Generate the bit mask for pixels that are corners
+    // todo
+}
+
+void computeUV(){
+  // From the image2D data buffer, extract the U and V values at corners using SSD
+  // todo
+}
 
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
@@ -71,6 +126,8 @@ void setup() {
 
 }
 
+// we have 80ms (12.5 fps) between camera frames to compute and act on the information
+
 void loop(){
   // setting up a pointer to the frame buffer
   camera_fb_t * fb = NULL;
@@ -79,8 +136,8 @@ void loop(){
   fb = esp_camera_fb_get();
 
   if (!fb) {
-    Serial.println("Camera capture failed");
     return;
+    Serial.println("Camera capture failed");
   }
 
   int leftSum = 0;
@@ -89,27 +146,22 @@ void loop(){
 
 
   if (fb) {
+    Serial.print("t:");
+    Serial.println(millis());
+    Serial.print("Camera buffer length:");
+    Serial.println(fb->len);
+
     // Transfer pixel data from the image buffer to the 2D array
     for (int row = 0; row < IMAGE_HEIGHT; row++) {
       for (int col = 0; col < IMAGE_WIDTH; col++) {
         int index = (row * IMAGE_WIDTH) + col; // Calculate the index in the 1D buffer
-        image2D[row][col] = (fb->buf[index] > THRESHOLD) ? 1 : 0;;    // Copy the pixel value to the 2D array and put a 1 if above threshold, otherwise 0
-
-        //dividing image up into thirds, left, center, and right
-        if (col < IMAGE_WIDTH/3){
-          leftSum += image2D[row][col];
-        }
-        if (col > IMAGE_WIDTH/3 && col < 2*IMAGE_WIDTH/3){
-          centerSum += image2D[row][col];
-        }
-        if (col > 2*IMAGE_WIDTH/3 && col < IMAGE_WIDTH){
-          rightSum += image2D[row][col];
-        }
+        image2D[t][row][col] = fb->buf[index];    // Copy the pixel value to the 2D array and put a 1 if above threshold, otherwise 0
+        computeUV();
       }
     }
-
-  // Release the image buffer
-  esp_camera_fb_return(fb);
+    t = (t+1)%2;
+    // Release the image buffer
+    esp_camera_fb_return(fb);
   }
 
   if(centerSum >= leftSum && centerSum >= rightSum){
