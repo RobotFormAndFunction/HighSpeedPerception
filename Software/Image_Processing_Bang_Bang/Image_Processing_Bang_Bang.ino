@@ -6,20 +6,26 @@
 #include "soc/rtc_cntl_reg.h"  // Disable brownout problems
 #include "driver/rtc_io.h"
 #include "img_converters.h" // see https://github.com/espressif/esp32-camera/blob/master/conversions/include/img_converters.h
+#include <BasicLinearAlgebra.h>
+
+// https://github.com/tomstewart89/BasicLinearAlgebra/blob/master/examples/References/References.ino
+using namespace BLA;
 
 #define CAMERA_MODEL_XIAO_ESP32S3 // Has PSRAM
 
+#define MAX_PIX_CORR = 128   // MAXIMUM_PIXEL_CORRESPONDENCES - the upper bound on how many corresponding points to try to match between two subsequent frames
 #include "camera_pins.h"
 
 const int IMAGE_WIDTH = 320; // set the camera properties to this size in the configure file
 const int IMAGE_HEIGHT = 240; // set the camera properties to this size
 
 // two instances of Two-dimensional array to hold the pixel values at consecutive time points
-uint8_t image2D[2][IMAGE_HEIGHT][IMAGE_WIDTH]; //3 array to make a binary image file
-uint8_t t = 0;   // timestep of latest image to go into buffer
-#define THRESHOLD 150 //decimal threshold for white pixel
-uint8_t UVimage2D[IMAGE_HEIGHT][IMAGE_WIDTH][2]; // 3D array tracking the U and V values for each pixel of incoming frames
-
+BLA::Matrix<IMAGE_HEIGHT, IMAGE_WIDTH,uint8_t> frames[2];
+bool t = 0;   // timestep of latest image to go into buffer
+#define THRESHOLD 255/50 //integer threshold for corner pixel - at least a 50 out of 255, but inverted for faster compute
+BLA::Matrix<IMAGE_HEIGHT, IMAGE_WIDTH,uint8_t> UVimage2D[2];  // 3D array tracking the U and V values for each pixel of incoming frames
+#define U_idx 0
+#define V_idx 1
 
 // our call back to dump whatever we got in binary format, this is used with CoolTerm on my machine to capture an image
 size_t jpgCallBack(void * arg, size_t index, const void* data, size_t len) {
@@ -30,58 +36,111 @@ size_t jpgCallBack(void * arg, size_t index, const void* data, size_t len) {
   return 0;
 }
 
-float eigenvals[2];
-float * calculateEigenvals2x2(M00, M01, M10, M11){
-  
-}
-
 uint8_t deltas[3]; // tracks x,y,z values returned by partialD, overwrtiting the same memory with each function call
-uint8_t * partialD(uint8_t** f1,uint8_t** f2, uint8_t x, uint8_t y) {
+uint8_t * partialD(uint8_t x, uint8_t y, bool t) {
   /**
   partial derivative over x,y,t between frames f1 and f2 at pixel coordinates (x,y)
+  not divided by 4 as it should be to avoid loss of information with integer-type data storage
   */
-  deltas[0] /*x*/ = (f1[y][x+1] + f1[y+1][x+1] + f2[y][x+1] + f2[y+1][x+1]) - 
-                    (f1[y][x  ] + f1[y+1][x  ] + f2[y][x  ] + f2[y+1][x  ]);
-  deltas[1] /*y*/ = (f1[y+1][x] + f1[y+1][x+1] + f2[y+1][x] + f2[y+1][x+1]) - 
-                    (f1[y  ][x] + f1[y  ][x  ] + f2[y  ][x] + f2[y+1][x  ]);
-  deltas[2] /*t*/ = (f2[y ][x ] + f2[y+1][x  ] + f2[y][x+1] + f2[y+1][x+1]) - 
-                    (f1[y ][x ] + f1[y+1][x  ] + f1[y][x+1] + f1[y+1][x+1]);
+  bool n = (1+t)%2;  
+  deltas[0] /*x*/ = (frames[t](y,x+1) + frames[t](y+1,x+1) + frames[n](y,x+1) + frames[n](y+1,x+1)) - 
+                    (frames[t](y,x)   + frames[t](y+1,x  ) + frames[n](y,x  ) + frames[n](y+1,x  ));
+  deltas[1] /*y*/ = (frames[t](y+1,x) + frames[t](y+1,x+1) + frames[n](y+1,x) + frames[n](y+1,x+1)) - 
+                    (frames[t](y,x)   + frames[t](y  ,x  ) + frames[n](y,  x) + frames[n](y+1,x  ));
+  deltas[2] /*t*/ = (frames[n](y,x)   + frames[n](y+1,x  ) + frames[n](y,x+1) + frames[n](y+1,x+1)) - 
+                    (frames[t](y,x)   + frames[t](y+1,x  ) + frames[t](y,x+1) + frames[t](y+1,x+1));
 
   return deltas;
 }
 
-uint8_t * cornerDetect(uint8_t** f1,uint8_t** f2) {
-    // Computes the pixels in the image that have high dx and dy gradients, making them likely corners
-    uint8_t window_size = 3;   // how many pixels (one axis length) to include in the summation for corner detection
-    // uint8_t os = window_size/2; // offset - halved to shift iteration point toward the center of the patch
+uint8_t eigenvals[2]; // tracks eigenvalues of the matrix
+uint8_t * get_eigenvals(Matrix<2,2> M) { 
+  /** 
+  Loads the eigenvalues for a 2x2 symmetric matrix into eigenvals[2].
+  This will provide the wrong answer for all other matrices
+  */
+    uint8_t a = M(0,0);
+    uint8_t b = M(0,1);
+    uint8_t c = M(1,1);
+    uint8_t base = a+c;
+    uint8_t radical = (a-c)*(a-c) + (4*b*b);
+    eigenvals[0] = (base + sqrt(radical)) / 2;
+    eigenvals[1] = (base - sqrt(radical)) / 2;
+    return eigenvals;
+}
 
-    for (int row = 0; row < IMAGE_HEIGHT - window_size; row++) {
-        for (int col = 0; col < IMAGE_WIDTH - window_size; col++) {
-            uint8_t M0, M1, M2; // track the sums: M0 -> Ix^2, M1 -> IxIy, M2 -> Iy^2
-            M0 = M1 = M2 = 0;
-            for (int y = row; y < row + window_size; y++) {
-              for (int x = col; x < col + window_size; x++) {
-                uint8_t *grad = partialD(f1, f2, x, y);  // I_x, I_y, I_t
-                M0 += grad[0] * grad[0];  // I_x ^2
-                M1 += grad[0] * grad[1];  // I_x * I_y
-                M2 += grad[1] * grad[1];  // I_y ^2
-              }
+SparseMatrix<IMAGE_HEIGHT, IMAGE_WIDTH, uint8_t, MAX_PIX_CORR> corners_map;
+uint8_t * cornerDetect(bool t) {
+    // t: the starting frame
+    // Computes the pixels in the image that have high dx and dy gradients, making them likely corners
+    #define sl 3 // side length - how many pixels (one axis length) to include in the summation for corner detection
+    // uint8_t os = window_size/2; // offset - halved to shift iteration point toward the center of the patch
+    Matrix<IMAGE_HEIGHT, IMAGE_WIDTH, uint8_t> corners;
+    corners.Fill(0);
+
+    for (int row = 0; row < IMAGE_HEIGHT - sl; row++) {
+        for (int col = 0; col < IMAGE_WIDTH - sl; col++) {
+            Matrix<2,2> M;
+            M.Fill(0);
+            // RefMatrix<BLA::Matrix<IMAGE_HEIGHT, IMAGE_WIDTH> sl,sl> patch0(video[t].Submatrix<sl,sl>(row,col)); 
+
+            for (int y = row; y < row + sl; y++) {
+                for (int x = col; x < col + sl; x++) {
+                    uint8_t *grad = partialD(x, y, t);  // I_x, I_y, I_t
+                    M(0,0) += grad[0] * grad[0];              // I_x ^2
+                    M(0,1) += grad[0] * grad[1];              // I_x * I_y
+                    M(1,0) += grad[1] * grad[0];              // I_x * I_y
+                    M(1,1) += grad[1] * grad[1];              // I_y ^2
+                }
             }
 
             // determine eigenvalues from matrix M
+            get_eigenvals(M);
+            uint8_t eg = eigenvals[0]; // λ_1 - the greater eigenvalue
+            uint8_t el = eigenvals[1]; // λ_2 - the smaller eigenvalue
 
             // use the eigenvalues to determine partial derivatives
-            // todo
+            corners(row, col) = eg + el + eg*el;  //  eg*el = likely a corner.  If we don't get any corners, the edges will have to do.
         }
     }
 
     // Generate the bit mask for pixels that are corners
-    // todo
+    // find the maximum of the matrix
+    uint8_t mx = corners(0,0); //maximum value of the matrix
+    for (int row = 0; row < IMAGE_HEIGHT - sl; row++) {
+        for (int col = 0; col < IMAGE_WIDTH - sl; col++) {
+            if(mx < corners(row,col)) {mx = corners(row,col);}
+        }
+    }
+
+
+
+    // assume anything that is 20%+ of the maximum is a corner
+    for (int row = 0; row < IMAGE_HEIGHT - sl; row++) {
+        for (int col = 0; col < IMAGE_WIDTH - sl; col++) {
+            // point / mx -> [0,1]  
+            // THRESHOLD -> 255/50 -> ~5, 
+            // so p/mx > 0.2 should be non-zero
+            if (((THRESHOLD * corners(row,col)) / mx) > 0) {
+                corners_map(row,col) = 1;
+            };
+        }
+    }
+
 }
+void clearCorners(){"todo";}
+
 
 void computeUV(){
-  // From the image2D data buffer, extract the U and V values at corners using SSD
-  // todo
+    cornerDetect(t);
+    // From the image data buffer, extract the U and V values at corners using SSD
+    // iterator over sparse matrix elements based on: https://github.com/tomstewart89/BasicLinearAlgebra/blob/94f2bdf8c245cefc66842a7386940a045e7ef29f/test/test_linear_algebra.cpp#L159
+    for(uint8_t i = 0; i < corners_map::Size; i++) {
+        const auto &corner = corners_map.table[i];
+        uint8_t r = corner.row;
+        uint8_t c = corner.col;
+        // compute SSD over a couple of surrounding candidate (u,v) tuples
+    }
 }
 
 void setup() {
@@ -155,14 +214,18 @@ void loop(){
     for (int row = 0; row < IMAGE_HEIGHT; row++) {
       for (int col = 0; col < IMAGE_WIDTH; col++) {
         int index = (row * IMAGE_WIDTH) + col; // Calculate the index in the 1D buffer
-        image2D[t][row][col] = fb->buf[index];    // Copy the pixel value to the 2D array and put a 1 if above threshold, otherwise 0
-        computeUV();
+        frames[t](row, col) = fb->buf[index];    // Copy the pixel value to the 2D array and put a 1 if above threshold, otherwise 0
       }
     }
-    t = (t+1)%2;
     // Release the image buffer
     esp_camera_fb_return(fb);
+
+    // compute the consequences
+    t = (t+1)%2;
+    computeUV();
   }
+
+
 
   if(centerSum >= leftSum && centerSum >= rightSum){
     Serial.println("both motors on");
