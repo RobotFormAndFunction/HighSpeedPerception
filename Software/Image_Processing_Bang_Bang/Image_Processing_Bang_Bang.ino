@@ -13,7 +13,7 @@ using namespace BLA;
 
 #define CAMERA_MODEL_XIAO_ESP32S3 // Has PSRAM
 
-#define MAX_PIX_CORR = 128   // MAXIMUM_PIXEL_CORRESPONDENCES - the upper bound on how many corresponding points to try to match between two subsequent frames
+#define MAX_PIX_CORR 128   // MAXIMUM_PIXEL_CORRESPONDENCES - the upper bound on how many corresponding points to try to match between two subsequent frames
 #include "camera_pins.h"
 
 const int IMAGE_WIDTH = 320; // set the camera properties to this size in the configure file
@@ -70,15 +70,21 @@ uint8_t * get_eigenvals(Matrix<2,2> M) {
 }
 
 SparseMatrix<IMAGE_HEIGHT, IMAGE_WIDTH, uint8_t, MAX_PIX_CORR> corners_map;
+Matrix      <IMAGE_HEIGHT, IMAGE_WIDTH, uint8_t> corners;
 uint8_t * cornerDetect(bool t) {
+    Serial.println("Beginning corner detection");
     // t: the starting frame
     // Computes the pixels in the image that have high dx and dy gradients, making them likely corners
     #define sl 3 // side length - how many pixels (one axis length) to include in the summation for corner detection
     // uint8_t os = window_size/2; // offset - halved to shift iteration point toward the center of the patch
-    Matrix<IMAGE_HEIGHT, IMAGE_WIDTH, uint8_t> corners;
     corners.Fill(0);
 
+    Serial.println("Created corners matrix");
+    Serial.print("Processing row...");
     for (int row = 0; row < IMAGE_HEIGHT - sl; row++) {
+        Serial.print(row);
+        Serial.print(" ");
+        if(row%32 == 0) {Serial.println("");}
         for (int col = 0; col < IMAGE_WIDTH - sl; col++) {
             Matrix<2,2> M;
             M.Fill(0);
@@ -104,6 +110,8 @@ uint8_t * cornerDetect(bool t) {
         }
     }
 
+    Serial.println("\nComputed corner eigenvalues");
+
     // Generate the bit mask for pixels that are corners
     // find the maximum of the matrix
     uint8_t mx = corners(0,0); //maximum value of the matrix
@@ -113,9 +121,10 @@ uint8_t * cornerDetect(bool t) {
         }
     }
 
-
+    Serial.println("Computed maximum corner value");
 
     // assume anything that is 20%+ of the maximum is a corner
+    uint8_t entities = 0;
     for (int row = 0; row < IMAGE_HEIGHT - sl; row++) {
         for (int col = 0; col < IMAGE_WIDTH - sl; col++) {
             // point / mx -> [0,1]  
@@ -123,19 +132,25 @@ uint8_t * cornerDetect(bool t) {
             // so p/mx > 0.2 should be non-zero
             if (((THRESHOLD * corners(row,col)) / mx) > 0) {
                 corners_map(row,col) = 1;
+                entities++;
             };
         }
     }
-
+    Serial.printf("Completed mask generation of corners_map with %d corners.", entities);
 }
-void clearCorners(){"todo";}
+void clearCorners(){
+    corners_map.Fill(0);
+}
 
 
 void computeUV(){
+    Serial.println("Beginning UV Computation");
+    corners_map.Fill(0);    // clearCorners();
     cornerDetect(t);
     // From the image data buffer, extract the U and V values at corners using SSD
     // iterator over sparse matrix elements based on: https://github.com/tomstewart89/BasicLinearAlgebra/blob/94f2bdf8c245cefc66842a7386940a045e7ef29f/test/test_linear_algebra.cpp#L159
-    for(uint8_t i = 0; i < corners_map::Size; i++) {
+    Serial << "This frame has " << corners_map.Size << " corner pixels.\n";
+    for(uint8_t i = 0; i < corners_map.Size; i++) {
         const auto &corner = corners_map.table[i];
         uint8_t r = corner.row;
         uint8_t c = corner.col;
