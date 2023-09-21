@@ -36,6 +36,10 @@ uint8_t corr_V[MAX_PIX_CORR];
 bool   corr_en[MAX_PIX_CORR];
 uint8_t currentFrameCorners = 0;
 
+#define corner_sl 3 // side length - how many pixels (one axis length) to include in the summation for corner detection
+#define SSD_MATCH_WINDOW 5    // correspondence search window - how far to look in each direction for a correspondence match
+#define SSD_PATCH_SIZE 5
+
 // our call back to dump whatever we got in binary format, this is used with CoolTerm on my machine to capture an image
 size_t jpgCallBack(void * arg, size_t index, const void* data, size_t len) {
   uint8_t* basePtr = (uint8_t*) data;
@@ -101,23 +105,21 @@ void cornerDetect(bool t) {
     Serial.println("Beginning corner detection");
     // t: the starting frame
     // Computes the pixels in the image that have high dx and dy gradients, making them likely corners
-    #define sl 3 // side length - how many pixels (one axis length) to include in the summation for corner detection
     // uint8_t os = window_size/2; // offset - halved to shift iteration point toward the center of the patch
     corners.Fill(0);
 
     Serial.println("Created corners matrix");
     Serial.println("Processing rows...");
-    for (int row = 0; row < IMAGE_HEIGHT - sl; row++) {
+    for (int row = 0; row < IMAGE_HEIGHT - corner_sl; row++) {
         // Serial.print(row);
         // Serial.print(" ");
         // if(row%32 == 0) {Serial.println("");}
-        for (int col = 0; col < IMAGE_WIDTH - sl; col++) {
+        for (int col = 0; col < IMAGE_WIDTH - corner_sl; col++) {
             Matrix<2,2> M;
             M.Fill(0);
-            // RefMatrix<BLA::Matrix<IMAGE_HEIGHT, IMAGE_WIDTH> sl,sl> patch0(video[t].Submatrix<sl,sl>(row,col)); 
 
-            for (int y = row; y < row + sl; y++) {
-                for (int x = col; x < col + sl; x++) {
+            for (int y = row; y < row + corner_sl; y++) {
+                for (int x = col; x < col + corner_sl; x++) {
                     uint8_t *grad = partialD(x, y, t);  // I_x, I_y, I_t
                     M(0,0) += grad[0] * grad[0];              // I_x ^2
                     M(0,1) += grad[0] * grad[1];              // I_x * I_y
@@ -141,8 +143,8 @@ void cornerDetect(bool t) {
     // Generate the bit mask for pixels that are corners
     // find the maximum of the matrix
     uint8_t mx = corners(0,0); //maximum value of the matrix
-    for (int row = 0; row < IMAGE_HEIGHT - sl; row++) {
-        for (int col = 0; col < IMAGE_WIDTH - sl; col++) {
+    for (int row = 0; row < IMAGE_HEIGHT - corner_sl; row++) {
+        for (int col = 0; col < IMAGE_WIDTH - corner_sl; col++) {
             if(mx < corners(row,col)) {mx = corners(row,col);}
         }
     }
@@ -151,8 +153,8 @@ void cornerDetect(bool t) {
 
     // assume anything that is 20%+ of the maximum is a corner
     uint8_t ent = 0;
-    for (int row = 0; row < IMAGE_HEIGHT - sl; row++) {
-        for (int col = 0; col < IMAGE_WIDTH - sl; col++) {
+    for (int row = 0; row < IMAGE_HEIGHT - corner_sl; row++) {
+        for (int col = 0; col < IMAGE_WIDTH - corner_sl; col++) {
             // point / mx -> [0,1]  
             // THRESHOLD -> 255/50 -> ~5, 
             // so p/mx > 0.2 should be non-zero
@@ -174,21 +176,59 @@ void cornerDetect(bool t) {
 
 }
 
+void timeLog(char *data) {
+    Serial.printf("%d - %s", millis(), data);
+}
+
+int ssd (bool t0, bool t1, int x0, int y0, int x1, int y1){
+  /**
+  t0 - time buffer index of first frame
+  t1 - time buffer index of second frame
+  x0,y0 - image coordinates of top left corner of patch t0
+  x1,y1 - image coordinates of top left corner of patch t1
+  */
+  int diff = 0;
+  for(int i = 0; i < SSD_MATCH_WINDOW; i++){
+    for(int j = 0; j < SSD_MATCH_WINDOW; j++){
+      int d = frames[t0](y0+i,x0+j) - frames[t1](y1+i,x1+j); // compute difference between each 2 corresponding pixels in the patch
+      diff += d*d; // square that and add it to the sum to get SSD
+    }
+  }
+
+  return diff;
+}
+
 void computeUV(){
-    Serial.println("Beginning UV Computation");
+    Serial.printf("%d - Beginning UV Computation.\n", millis());
     corr_en[0] = 0;  // "clear" all corners by setting the first one as disabled // corners_map.Fill(0);    // clearCorners();
     cornerDetect(t);
-    Serial.println("Completed Corner Detection");
+    Serial.printf("%d - Completed Corner Detection.\n", millis());
     // From the image data buffer, extract the U and V values at corners using SSD
     // iterator over sparse matrix elements based on: https://github.com/tomstewart89/BasicLinearAlgebra/blob/94f2bdf8c245cefc66842a7386940a045e7ef29f/test/test_linear_algebra.cpp#L159
     for(uint8_t i = 0; i < currentFrameCorners; i++) {
-        uint8_t r = corr_Y[i];
-        uint8_t c = corr_X[i];
+        uint8_t y = corr_Y[i];
+        uint8_t x = corr_X[i];
+        int best_u = 0;
+        int best_v = 0;
+        int best_diff = 2<<30; // huge number to ensure it is overwritten immediately
         // compute SSD over a couple of surrounding candidate (u,v) tuples
-        // todo
+        for(int u = -SSD_MATCH_WINDOW; u<SSD_MATCH_WINDOW; u++) {
+          for(int v = -SSD_MATCH_WINDOW; v<SSD_MATCH_WINDOW; v++) {
+            int diff = ssd(!t, t, x, y, x+u, y+v);
+            if (diff < best_diff){
+              best_u = u;
+              best_v = v;
+              best_diff = diff;
+            }
+            if (diff == 0) break; // if you found a perfect match (which should rarely if ever happen) don't keep searching
+          }
+        }
+
+        corr_U[i] = best_u;
+        corr_V[i] = best_v;
     }
 
-    Serial.println("Completed UV Segment");
+    Serial.printf("%d - Completed UV Segment.\n", millis());
 }
 
 int configureSD(){
