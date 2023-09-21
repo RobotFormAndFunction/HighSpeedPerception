@@ -12,9 +12,9 @@
 using namespace BLA;
 
 #define CAMERA_MODEL_XIAO_ESP32S3 // Has PSRAM
-
-#define MAX_PIX_CORR 128   // MAXIMUM_PIXEL_CORRESPONDENCES - the upper bound on how many corresponding points to try to match between two subsequent frames
 #include "camera_pins.h"
+
+bool sd_sign = false;              // Check sd status
 
 const int IMAGE_WIDTH = 320; // set the camera properties to this size in the configure file
 const int IMAGE_HEIGHT = 240; // set the camera properties to this size
@@ -23,9 +23,18 @@ const int IMAGE_HEIGHT = 240; // set the camera properties to this size
 BLA::Matrix<IMAGE_HEIGHT, IMAGE_WIDTH,uint8_t> frames[2];
 bool t = 0;   // timestep of latest image to go into buffer
 #define THRESHOLD 255/50 //integer threshold for corner pixel - at least a 50 out of 255, but inverted for faster compute
-BLA::Matrix<IMAGE_HEIGHT, IMAGE_WIDTH,uint8_t> UVimage2D[2];  // 3D array tracking the U and V values for each pixel of incoming frames
-#define U_idx 0
-#define V_idx 1
+// BLA::Matrix<IMAGE_HEIGHT, IMAGE_WIDTH,uint8_t> UVimage2D[2];  // 3D array tracking the U and V values for each pixel of incoming frames
+// #define U_idx 0
+// #define V_idx 1
+
+#define MAX_PIX_CORR 128   // MAXIMUM_PIXEL_CORRESPONDENCES - the upper bound on how many corresponding points to try to match between two subsequent frames
+// correspondence point arrays represent the 5 values describing the points in the correspondence array
+uint8_t corr_X[MAX_PIX_CORR];
+uint8_t corr_Y[MAX_PIX_CORR];
+uint8_t corr_U[MAX_PIX_CORR];
+uint8_t corr_V[MAX_PIX_CORR];
+bool   corr_en[MAX_PIX_CORR];
+uint8_t currentFrameCorners = 0;
 
 // our call back to dump whatever we got in binary format, this is used with CoolTerm on my machine to capture an image
 size_t jpgCallBack(void * arg, size_t index, const void* data, size_t len) {
@@ -34,6 +43,23 @@ size_t jpgCallBack(void * arg, size_t index, const void* data, size_t len) {
     Serial.write(basePtr[i]);
   }
   return 0;
+}
+
+// based on take_photos writeFile
+void photo_save() {
+    char filename[32];
+    sprintf(filename, "/image%d.bytes", millis());
+    Serial.printf("Beginning of writing file %s\n", filename);
+    File file = SD.open(filename, FILE_WRITE);
+    
+    for (int row = 0; row < IMAGE_HEIGHT; row++) {
+      for (int col = 0; col < IMAGE_WIDTH; col++) {
+        file.write(frames[t](row,col));
+      }
+    }
+
+    Serial.println("File written");
+    file.close();
 }
 
 uint8_t deltas[3]; // tracks x,y,z values returned by partialD, overwrtiting the same memory with each function call
@@ -71,7 +97,7 @@ uint8_t * get_eigenvals(Matrix<2,2> M) {
 
 SparseMatrix<IMAGE_HEIGHT, IMAGE_WIDTH, uint8_t, MAX_PIX_CORR> corners_map;
 Matrix      <IMAGE_HEIGHT, IMAGE_WIDTH, uint8_t> corners;
-uint8_t * cornerDetect(bool t) {
+void cornerDetect(bool t) {
     Serial.println("Beginning corner detection");
     // t: the starting frame
     // Computes the pixels in the image that have high dx and dy gradients, making them likely corners
@@ -80,11 +106,11 @@ uint8_t * cornerDetect(bool t) {
     corners.Fill(0);
 
     Serial.println("Created corners matrix");
-    Serial.print("Processing row...");
+    Serial.println("Processing rows...");
     for (int row = 0; row < IMAGE_HEIGHT - sl; row++) {
-        Serial.print(row);
-        Serial.print(" ");
-        if(row%32 == 0) {Serial.println("");}
+        // Serial.print(row);
+        // Serial.print(" ");
+        // if(row%32 == 0) {Serial.println("");}
         for (int col = 0; col < IMAGE_WIDTH - sl; col++) {
             Matrix<2,2> M;
             M.Fill(0);
@@ -110,7 +136,7 @@ uint8_t * cornerDetect(bool t) {
         }
     }
 
-    Serial.println("\nComputed corner eigenvalues");
+    Serial.println("Computed corner eigenvalues");
 
     // Generate the bit mask for pixels that are corners
     // find the maximum of the matrix
@@ -124,46 +150,81 @@ uint8_t * cornerDetect(bool t) {
     Serial.println("Computed maximum corner value");
 
     // assume anything that is 20%+ of the maximum is a corner
-    uint8_t entities = 0;
+    uint8_t ent = 0;
     for (int row = 0; row < IMAGE_HEIGHT - sl; row++) {
         for (int col = 0; col < IMAGE_WIDTH - sl; col++) {
             // point / mx -> [0,1]  
             // THRESHOLD -> 255/50 -> ~5, 
             // so p/mx > 0.2 should be non-zero
             if (((THRESHOLD * corners(row,col)) / mx) > 0) {
-                corners_map(row,col) = 1;
-                entities++;
+                // corners_map(row,col) = 1;
+                corr_en[ent] = 1;
+                corr_Y[ent] = row;
+                corr_X[ent] = col;
+                ent++;
             };
+            if(ent == MAX_PIX_CORR) break;
         }
     }
-    Serial.printf("Completed mask generation of corners_map with %d corners.", entities);
-}
-void clearCorners(){
-    corners_map.Fill(0);
-}
+    if(ent < MAX_PIX_CORR) {
+        corr_en[ent]=0; // disable the next element in the array to truncate the list for this frame
+    }
+    Serial.printf("Completed mask generation of corners_map with %d corners.\n", ent);
+    currentFrameCorners = ent;
 
+}
 
 void computeUV(){
     Serial.println("Beginning UV Computation");
-    corners_map.Fill(0);    // clearCorners();
+    corr_en[0] = 0;  // "clear" all corners by setting the first one as disabled // corners_map.Fill(0);    // clearCorners();
     cornerDetect(t);
+    Serial.println("Completed Corner Detection");
     // From the image data buffer, extract the U and V values at corners using SSD
     // iterator over sparse matrix elements based on: https://github.com/tomstewart89/BasicLinearAlgebra/blob/94f2bdf8c245cefc66842a7386940a045e7ef29f/test/test_linear_algebra.cpp#L159
-    Serial << "This frame has " << corners_map.Size << " corner pixels.\n";
-    for(uint8_t i = 0; i < corners_map.Size; i++) {
-        const auto &corner = corners_map.table[i];
-        uint8_t r = corner.row;
-        uint8_t c = corner.col;
+    for(uint8_t i = 0; i < currentFrameCorners; i++) {
+        uint8_t r = corr_Y[i];
+        uint8_t c = corr_X[i];
         // compute SSD over a couple of surrounding candidate (u,v) tuples
+        // todo
     }
+
+    Serial.println("Completed UV Segment");
 }
 
-void setup() {
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
+int configureSD(){
+    // 0 -> good
+    // non-zero -> error
+    // Initialize SD card
+    if(!SD.begin(21)){
+        Serial.println("Card Mount Failed");
+        return 1;
+    }
+    uint8_t cardType = SD.cardType();
 
-  Serial.begin(115200);
-  while(!Serial); // When the serial monitor is turned on, the program starts to execute
+    // Determine if the type of SD card is available
+    if(cardType == CARD_NONE){
+        Serial.println("No SD card attached");
+        return 2;
+    }
 
+    Serial.print("SD Card Type: ");
+    if(cardType == CARD_MMC){
+        Serial.println("MMC");
+    } else if(cardType == CARD_SD){
+        Serial.println("SDSC");
+    } else if(cardType == CARD_SDHC){
+        Serial.println("SDHC");
+    } else {
+        Serial.println("UNKNOWN");
+    }
+
+    sd_sign = true; // sd initialization check passes
+    return 0;
+}
+
+int initCamera() {
+  // 0 -> success
+  // non-zero -> error
   camera_config_t config; //setting up configuration 
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -195,9 +256,24 @@ void setup() {
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed with error 0x%x", err);
-    return;
+    return err;
   }
+  return 0;
+}
 
+void setup() {
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
+
+  Serial.begin(115200);
+  while(!Serial); // When the serial monitor is turned on, the program starts to execute
+
+  if(initCamera()) return;
+  if(configureSD()) return;
+
+  // initialize all correspondence points to disabled
+  for(int i=0; i < MAX_PIX_CORR; i++) {
+      corr_en[i] = 0;
+  }
 }
 
 // we have 80ms (12.5 fps) between camera frames to compute and act on the information
@@ -220,10 +296,8 @@ void loop(){
 
 
   if (fb) {
-    Serial.print("t:");
-    Serial.println(millis());
-    Serial.print("Camera buffer length:");
-    Serial.println(fb->len);
+    Serial.printf("\n\nCYCLE START\n\nt: %d", millis());
+    Serial.printf("Camera buffer length: %d\n", fb->len);
 
     // Transfer pixel data from the image buffer to the 2D array
     for (int row = 0; row < IMAGE_HEIGHT; row++) {
@@ -236,8 +310,10 @@ void loop(){
     esp_camera_fb_return(fb);
 
     // compute the consequences
-    t = (t+1)%2;
     computeUV();
+    photo_save();
+
+    t = (t+1)%2;
   }
 
 
