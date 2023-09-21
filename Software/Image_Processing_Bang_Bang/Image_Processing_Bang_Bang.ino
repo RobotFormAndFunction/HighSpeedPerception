@@ -53,6 +53,7 @@ size_t jpgCallBack(void * arg, size_t index, const void* data, size_t len) {
 void photo_save() {
     char filename[32];
     sprintf(filename, "/image%d.bytes", millis());
+    timeLog("File write starting");
     Serial.printf("Beginning of writing file %s\n", filename);
     File file = SD.open(filename, FILE_WRITE);
     
@@ -62,7 +63,7 @@ void photo_save() {
       }
     }
 
-    Serial.println("File written");
+    timeLog("File written");
     file.close();
 }
 
@@ -102,18 +103,14 @@ uint8_t * get_eigenvals(Matrix<2,2> M) {
 SparseMatrix<IMAGE_HEIGHT, IMAGE_WIDTH, uint8_t, MAX_PIX_CORR> corners_map;
 Matrix      <IMAGE_HEIGHT, IMAGE_WIDTH, uint8_t> corners;
 void cornerDetect(bool t) {
-    Serial.println("Beginning corner detection");
+    timeLog("Beginning corner detection");
     // t: the starting frame
     // Computes the pixels in the image that have high dx and dy gradients, making them likely corners
     // uint8_t os = window_size/2; // offset - halved to shift iteration point toward the center of the patch
     corners.Fill(0);
 
-    Serial.println("Created corners matrix");
-    Serial.println("Processing rows...");
+    timeLog("Processing rows...");
     for (int row = 0; row < IMAGE_HEIGHT - corner_sl; row++) {
-        // Serial.print(row);
-        // Serial.print(" ");
-        // if(row%32 == 0) {Serial.println("");}
         for (int col = 0; col < IMAGE_WIDTH - corner_sl; col++) {
             Matrix<2,2> M;
             M.Fill(0);
@@ -138,7 +135,7 @@ void cornerDetect(bool t) {
         }
     }
 
-    Serial.println("Computed corner eigenvalues");
+    timeLog("Computed corner eigenvalues");
 
     // Generate the bit mask for pixels that are corners
     // find the maximum of the matrix
@@ -149,7 +146,7 @@ void cornerDetect(bool t) {
         }
     }
 
-    Serial.println("Computed maximum corner value");
+    timeLog("Computed maximum corner value");
 
     // assume anything that is 20%+ of the maximum is a corner
     uint8_t ent = 0;
@@ -171,13 +168,14 @@ void cornerDetect(bool t) {
     if(ent < MAX_PIX_CORR) {
         corr_en[ent]=0; // disable the next element in the array to truncate the list for this frame
     }
-    Serial.printf("Completed mask generation of corners_map with %d corners.\n", ent);
+    timeLog("Completed mask generation of corners_map");
+    Serial.printf("               with %d corners.\n", ent);
     currentFrameCorners = ent;
 
 }
 
 void timeLog(char *data) {
-    Serial.printf("%d - %s", millis(), data);
+    Serial.printf("%d - %s.\n", millis(), data);
 }
 
 int ssd (bool t0, bool t1, int x0, int y0, int x1, int y1){
@@ -199,10 +197,10 @@ int ssd (bool t0, bool t1, int x0, int y0, int x1, int y1){
 }
 
 void computeUV(){
-    Serial.printf("%d - Beginning UV Computation.\n", millis());
+    timeLog("Beginning UV Computation");
     corr_en[0] = 0;  // "clear" all corners by setting the first one as disabled // corners_map.Fill(0);    // clearCorners();
     cornerDetect(t);
-    Serial.printf("%d - Completed Corner Detection.\n", millis());
+    timeLog("Completed Corner Detection");
     // From the image data buffer, extract the U and V values at corners using SSD
     // iterator over sparse matrix elements based on: https://github.com/tomstewart89/BasicLinearAlgebra/blob/94f2bdf8c245cefc66842a7386940a045e7ef29f/test/test_linear_algebra.cpp#L159
     for(uint8_t i = 0; i < currentFrameCorners; i++) {
@@ -228,7 +226,7 @@ void computeUV(){
         corr_V[i] = best_v;
     }
 
-    Serial.printf("%d - Completed UV Segment.\n", millis());
+    timeLog("Completed UV Segment");
 }
 
 int configureSD(){
@@ -322,6 +320,7 @@ void loop(){
   // setting up a pointer to the frame buffer
   camera_fb_t * fb = NULL;
   
+  Serial.printf("\n\n\t\tCYCLE START\t %d\n", millis());
   // Take Picture with camera and put in buffer
   fb = esp_camera_fb_get();
 
@@ -336,8 +335,8 @@ void loop(){
 
 
   if (fb) {
-    Serial.printf("\n\nCYCLE START\n\nt: %d", millis());
-    Serial.printf("Camera buffer length: %d\n", fb->len);
+    timeLog("Frame buffer verified");
+    // Serial.printf("Camera buffer length: %d\n", fb->len);
 
     // Transfer pixel data from the image buffer to the 2D array
     for (int row = 0; row < IMAGE_HEIGHT; row++) {
