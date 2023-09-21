@@ -16,8 +16,8 @@ using namespace BLA;
 
 bool sd_sign = false;              // Check sd status
 
-const int IMAGE_WIDTH = 320; // set the camera properties to this size in the configure file
-const int IMAGE_HEIGHT = 240; // set the camera properties to this size
+const int IMAGE_WIDTH = 96; // set the camera properties to this size in the configure file
+const int IMAGE_HEIGHT = 96; // set the camera properties to this size
 
 // two instances of Two-dimensional array to hold the pixel values at consecutive time points
 BLA::Matrix<IMAGE_HEIGHT, IMAGE_WIDTH,uint8_t> frames[2];
@@ -283,7 +283,7 @@ int initCamera() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-  config.frame_size = FRAMESIZE_QVGA; //changed to qvga for (320 x 240)
+  config.frame_size = FRAMESIZE_96X96; // _QVGA -> (320 x 240)   _96X96 -> (96 x 96)
   config.pixel_format = PIXFORMAT_GRAYSCALE; // changed to grayscale
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   config.fb_location = CAMERA_FB_IN_PSRAM;
@@ -350,7 +350,7 @@ void loop(){
 
     // compute the consequences
     computeUV();
-    photo_save();
+    // photo_save();
 
     t = (t+1)%2;
   }
