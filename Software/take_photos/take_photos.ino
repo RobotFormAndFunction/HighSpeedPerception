@@ -114,9 +114,9 @@ void setup() {
   } else {
     // Best option for face detection/recognition
     config.frame_size = FRAMESIZE_240X240;
-#if CONFIG_IDF_TARGET_ESP32S3
+  #if CONFIG_IDF_TARGET_ESP32S3
     config.fb_count = 2;
-#endif
+  #endif
   }
 
   // camera init
