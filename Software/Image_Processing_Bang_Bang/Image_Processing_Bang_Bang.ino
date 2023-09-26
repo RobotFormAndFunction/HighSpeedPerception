@@ -36,9 +36,9 @@ int8_t corr_V[MAX_PIX_CORR];
 bool   corr_en[MAX_PIX_CORR];
 uint8_t currentFrameCorners = 0;
 
-#define corner_sl 3 // side length - how many pixels (one axis length) to include in the summation for corner detection
-#define SSD_MATCH_WINDOW 5    // correspondence search window - how far to look in each direction for a correspondence match
-#define SSD_PATCH_SIZE 5
+#define corner_sl 5 // side length - how many pixels (one axis length) to include in the summation for corner detection
+#define SSD_MATCH_WINDOW 16    // correspondence search window - how far to look in each direction for a correspondence match
+#define SSD_PATCH_SIZE 7
 
 // our call back to dump whatever we got in binary format, this is used with CoolTerm on my machine to capture an image
 size_t jpgCallBack(void * arg, size_t index, const void* data, size_t len) {
@@ -249,7 +249,7 @@ void computeUV(){
         for(int u = -SSD_MATCH_WINDOW; u<SSD_MATCH_WINDOW; u++) {
           for(int v = -SSD_MATCH_WINDOW; v<SSD_MATCH_WINDOW; v++) {
             int diff = ssd(!t, t, x, y, x+u, y+v);
-            Serial.printf("nssd: %d.  ob_ssd: %d", diff, best_diff);
+            // Serial.printf("nssd: %d.  ob_ssd: %d", diff, best_diff);
             if (diff < best_diff){
               best_u = u;
               best_v = v;
@@ -262,14 +262,14 @@ void computeUV(){
 
         corr_U[i] = best_u;
         corr_V[i] = best_v;
-        Serial.printf("\nAdded corner: (%d,%d)\td:(%d,%d),\ti:%d\n", x,y, corr_U[i], corr_V[i], i);
+        // Serial.printf("\nAdded corner: (%d,%d)\td:(%d,%d),\ti:%d\n", x,y, corr_U[i], corr_V[i], i);
     }
 
-    timeLog("Completed UV Segment");
-    Serial.printf("X,Y,U,V tuples: ");
-    for(uint8_t i = 0; i < currentFrameCorners; i++) {
-        Serial.printf("(%d,%d, %d,%d)  ",corr_X[i], corr_Y[i], corr_U[i], corr_V[i]);
-    }
+    // timeLog("Completed UV Segment");
+    // Serial.printf("X,Y,U,V tuples: ");
+    // for(uint8_t i = 0; i < currentFrameCorners; i++) {
+        // Serial.printf("(%d,%d, %d,%d)  ",corr_X[i], corr_Y[i], corr_U[i], corr_V[i]);
+    // }
 }
 
 int configureSD(){
