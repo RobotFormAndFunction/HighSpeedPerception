@@ -22,7 +22,7 @@ const int IMAGE_HEIGHT = 96; // set the camera properties to this size
 // two instances of Two-dimensional array to hold the pixel values at consecutive time points
 BLA::Matrix<IMAGE_HEIGHT, IMAGE_WIDTH,uint8_t> frames[2];
 bool t = 0;   // timestep of latest image to go into buffer
-#define THRESHOLD 255/50 //integer threshold for corner pixel - at least a 50 out of 255, but inverted for faster compute
+#define THRESHOLD 255/150 //integer threshold for corner pixel - at least a 50 out of 255, but inverted for faster compute
 // BLA::Matrix<IMAGE_HEIGHT, IMAGE_WIDTH,uint8_t> UVimage2D[2];  // 3D array tracking the U and V values for each pixel of incoming frames
 // #define U_idx 0
 // #define V_idx 1
@@ -31,8 +31,8 @@ bool t = 0;   // timestep of latest image to go into buffer
 // correspondence point arrays represent the 5 values describing the points in the correspondence array
 uint8_t corr_X[MAX_PIX_CORR];
 uint8_t corr_Y[MAX_PIX_CORR];
-uint8_t corr_U[MAX_PIX_CORR];
-uint8_t corr_V[MAX_PIX_CORR];
+int8_t corr_U[MAX_PIX_CORR];
+int8_t corr_V[MAX_PIX_CORR];
 bool   corr_en[MAX_PIX_CORR];
 uint8_t currentFrameCorners = 0;
 
@@ -52,9 +52,13 @@ size_t jpgCallBack(void * arg, size_t index, const void* data, size_t len) {
 // based on take_photos writeFile
 void photo_save() {
     char filename[32];
+    char fileU[32];
+    char fileV[32];
     sprintf(filename, "/image%d.bytes", millis());
+    sprintf(fileU, "/image%d.U", millis());
+    sprintf(fileV, "/image%d.V", millis());
     timeLog("File write starting");
-    Serial.printf("Beginning of writing file %s\n", filename);
+    Serial.printf("Beginning of writing image %s\n", filename);
     File file = SD.open(filename, FILE_WRITE);
     
     for (int row = 0; row < IMAGE_HEIGHT; row++) {
@@ -63,8 +67,33 @@ void photo_save() {
       }
     }
 
-    timeLog("File written");
+    timeLog("Image written");
     file.close();
+
+    timeLog("Beginning of writing UV images");
+    File file_U = SD.open(fileU, FILE_WRITE);
+    File file_V = SD.open(fileV, FILE_WRITE);
+    int corr_i = 0;
+    
+    for(int img_i = 0; img_i < IMAGE_HEIGHT * IMAGE_WIDTH; img_i++) {
+        int y = img_i / IMAGE_WIDTH;
+        int x = img_i % IMAGE_WIDTH;
+
+        if(corr_i < MAX_PIX_CORR && corr_en[corr_i] && corr_X[corr_i] == x && corr_Y[corr_i] == y) {
+            file_U.write(corr_U[corr_i]);
+            file_V.write(corr_V[corr_i]);
+            corr_i++;
+        } else {
+            file_U.write(0);
+            file_V.write(0);
+        }
+    }
+
+    timeLog("U-V Images written with correspondence count:");
+    Serial.printf("              %d.\n", corr_i);
+    file_U.close();
+    file_V.close();
+
 }
 
 uint8_t deltas[3]; // tracks x,y,z values returned by partialD, overwrtiting the same memory with each function call
@@ -155,14 +184,21 @@ void cornerDetect(bool t) {
             // point / mx -> [0,1]  
             // THRESHOLD -> 255/50 -> ~5, 
             // so p/mx > 0.2 should be non-zero
-            if (((THRESHOLD * corners(row,col)) / mx) > 0) {
+            int eval = (THRESHOLD * corners(row, col)) / mx;
+            if (eval > 0) {
+                // Serial.printf("Corner at Row,Col (%d,%d)\twith evaluated threshold: %d.\n", row, col, eval);
                 // corners_map(row,col) = 1;
                 corr_en[ent] = 1;
                 corr_Y[ent] = row;
                 corr_X[ent] = col;
                 ent++;
             };
-            if(ent == MAX_PIX_CORR) break;
+            // end the cycle
+            if(ent == MAX_PIX_CORR) {
+                row = IMAGE_HEIGHT;
+                col = IMAGE_HEIGHT;
+                break;
+            }
         }
     }
     if(ent < MAX_PIX_CORR) {
@@ -206,13 +242,14 @@ void computeUV(){
     for(uint8_t i = 0; i < currentFrameCorners; i++) {
         uint8_t y = corr_Y[i];
         uint8_t x = corr_X[i];
-        int best_u = 0;
-        int best_v = 0;
-        int best_diff = 2<<30; // huge number to ensure it is overwritten immediately
+        int best_u = 0x69;
+        int best_v = 0x69;
+        int best_diff = 2<<20; // huge number to ensure it is overwritten immediately
         // compute SSD over a couple of surrounding candidate (u,v) tuples
         for(int u = -SSD_MATCH_WINDOW; u<SSD_MATCH_WINDOW; u++) {
           for(int v = -SSD_MATCH_WINDOW; v<SSD_MATCH_WINDOW; v++) {
             int diff = ssd(!t, t, x, y, x+u, y+v);
+            Serial.printf("nssd: %d.  ob_ssd: %d", diff, best_diff);
             if (diff < best_diff){
               best_u = u;
               best_v = v;
@@ -221,12 +258,18 @@ void computeUV(){
             if (diff == 0) break; // if you found a perfect match (which should rarely if ever happen) don't keep searching
           }
         }
+        
 
         corr_U[i] = best_u;
         corr_V[i] = best_v;
+        Serial.printf("\nAdded corner: (%d,%d)\td:(%d,%d),\ti:%d\n", x,y, corr_U[i], corr_V[i], i);
     }
 
     timeLog("Completed UV Segment");
+    Serial.printf("X,Y,U,V tuples: ");
+    for(uint8_t i = 0; i < currentFrameCorners; i++) {
+        Serial.printf("(%d,%d, %d,%d)  ",corr_X[i], corr_Y[i], corr_U[i], corr_V[i]);
+    }
 }
 
 int configureSD(){
@@ -350,7 +393,9 @@ void loop(){
 
     // compute the consequences
     computeUV();
-    // photo_save();
+    
+    // Uncomment for testing, comment out for high speed performance without SD card
+    photo_save();
 
     t = (t+1)%2;
   }
