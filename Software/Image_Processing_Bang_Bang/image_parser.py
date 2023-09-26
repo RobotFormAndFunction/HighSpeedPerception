@@ -12,7 +12,7 @@ def plotUV(U,V):
     # print(U,V)
     # https://matplotlib.org/stable/gallery/images_contours_and_fields/quiver_simple_demo.html#sphx-glr-gallery-images-contours-and-fields-quiver-simple-demo-py
     fig, ax = plt.subplots()
-    q = ax.quiver(np.arange(U.shape[0]), np.arange(U.shape[1]), U, V, scale=50)
+    q = ax.quiver(np.arange(U.shape[0]), -np.arange(U.shape[1]), U, V, scale=50)
     plt.show()
 
 

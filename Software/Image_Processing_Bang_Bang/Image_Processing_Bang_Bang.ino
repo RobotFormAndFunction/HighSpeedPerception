@@ -36,9 +36,10 @@ int8_t corr_V[MAX_PIX_CORR];
 bool   corr_en[MAX_PIX_CORR];
 uint8_t currentFrameCorners = 0;
 
-#define corner_sl 5 // side length - how many pixels (one axis length) to include in the summation for corner detection
-#define SSD_MATCH_WINDOW 16    // correspondence search window - how far to look in each direction for a correspondence match
-#define SSD_PATCH_SIZE 7
+#define corner_sl 4 // side length - how many pixels (one axis length) to include in the summation for corner detection
+#define SSD_MATCH_WINDOW 10    // correspondence search window - how far to look in each direction for a correspondence match
+#define SSD_PATCH_SIZE 5
+#define SSD_STEP_SIZE 2
 
 // our call back to dump whatever we got in binary format, this is used with CoolTerm on my machine to capture an image
 size_t jpgCallBack(void * arg, size_t index, const void* data, size_t len) {
@@ -222,8 +223,8 @@ int ssd (bool t0, bool t1, int x0, int y0, int x1, int y1){
   x1,y1 - image coordinates of top left corner of patch t1
   */
   int diff = 0;
-  for(int i = 0; i < SSD_MATCH_WINDOW; i++){
-    for(int j = 0; j < SSD_MATCH_WINDOW; j++){
+  for(int i = 0; i < SSD_MATCH_WINDOW; i+=SSD_STEP_SIZE){
+    for(int j = 0; j < SSD_MATCH_WINDOW; j+=SSD_STEP_SIZE){
       int d = frames[t0](y0+i,x0+j) - frames[t1](y1+i,x1+j); // compute difference between each 2 corresponding pixels in the patch
       diff += d*d; // square that and add it to the sum to get SSD
     }
@@ -265,7 +266,7 @@ void computeUV(){
         // Serial.printf("\nAdded corner: (%d,%d)\td:(%d,%d),\ti:%d\n", x,y, corr_U[i], corr_V[i], i);
     }
 
-    // timeLog("Completed UV Segment");
+    timeLog("Completed UV Segment");
     // Serial.printf("X,Y,U,V tuples: ");
     // for(uint8_t i = 0; i < currentFrameCorners; i++) {
         // Serial.printf("(%d,%d, %d,%d)  ",corr_X[i], corr_Y[i], corr_U[i], corr_V[i]);
