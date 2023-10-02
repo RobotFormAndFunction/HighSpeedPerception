@@ -5,7 +5,29 @@
 import os
 import cv2
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+
+
+# Configuration segment copied from MatPlotLib documentation:
+# https://matplotlib.org/stable/users/explain/colors/colormap-manipulation.html#creating-listed-colormaps
+top = mpl.colormaps['Oranges_r'].resampled(128)
+bottom = mpl.colormaps['Blues'].resampled(128)
+
+newcolors = np.vstack((top(np.linspace(0, 1, 128)),
+                       bottom(np.linspace(0, 1, 128))))
+non_zero_cmap = ListedColormap(newcolors, name='OrangeBlue')
+# End of config
+
+# Plotting function modified from MatPlotLib plot_examples:
+# https://matplotlib.org/stable/users/explain/colors/colormap-manipulation.html#creating-listed-colormaps
+def plot_u(U):
+    fig, ax = plt.subplots()
+    ax.invert_yaxis()
+    psm = ax.pcolormesh(U, cmap=non_zero_cmap, vmin=-10, vmax=10)
+    fig.colorbar(psm, ax=ax)
+
 
 
 def plotUV(U,V):
@@ -52,6 +74,7 @@ for f,t in zip(files, times):
 
     with open(f.replace("bytes", "U"), "rb") as uByteBuff:
         imgU = np.fromfile(uByteBuff, dtype=np.int8).reshape(camera_dims)
+        plot_u(imgU)
     with open(f.replace("bytes", "V"), "rb") as vByteBuff:
         imgV = np.fromfile(vByteBuff, dtype=np.int8).reshape(camera_dims)
     
