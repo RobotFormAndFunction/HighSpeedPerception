@@ -14,6 +14,8 @@ using namespace BLA;
 #define CAMERA_MODEL_XIAO_ESP32S3 // Has PSRAM
 #include "camera_pins.h"
 
+#define USE_SD_CARD 1    // set to 1 (true) for saving images
+
 bool sd_sign = false;              // Check sd status
 
 const int IMAGE_WIDTH = 96; // set the camera properties to this size in the configure file
@@ -45,7 +47,8 @@ uint8_t currentFrameCorners = 0;
 size_t jpgCallBack(void * arg, size_t index, const void* data, size_t len) {
   uint8_t* basePtr = (uint8_t*) data;
   for (size_t i = 0; i < len; i++) {
-    Serial.write(basePtr[i]);
+      if(Serial)
+          Serial.write(basePtr[i]);
   }
   return 0;
 }
@@ -55,11 +58,13 @@ void photo_save() {
     char filename[32];
     char fileU[32];
     char fileV[32];
-    sprintf(filename, "/image%d.bytes", millis());
-    sprintf(fileU, "/image%d.U", millis());
-    sprintf(fileV, "/image%d.V", millis());
+    int time = millis();
+    sprintf(filename, "/image%d.bytes", time);
+    sprintf(fileU, "/image%d.U", time);
+    sprintf(fileV, "/image%d.V", time);
     timeLog("File write starting");
-    Serial.printf("Beginning of writing image %s\n", filename);
+    if(Serial)
+        Serial.printf("Beginning of writing image %s\n", filename);
     File file = SD.open(filename, FILE_WRITE);
     
     for (int row = 0; row < IMAGE_HEIGHT; row++) {
@@ -91,7 +96,8 @@ void photo_save() {
     }
 
     timeLog("U-V Images written with correspondence count:");
-    Serial.printf("              %d.\n", corr_i);
+    if(Serial)
+      Serial.printf("              %d.\n", corr_i);
     file_U.close();
     file_V.close();
 
@@ -206,12 +212,14 @@ void cornerDetect(bool t) {
         corr_en[ent]=0; // disable the next element in the array to truncate the list for this frame
     }
     timeLog("Completed mask generation of corners_map");
-    Serial.printf("               with %d corners.\n", ent);
+    if(Serial)
+      Serial.printf("               with %d corners.\n", ent);
     currentFrameCorners = ent;
 
 }
 
 void timeLog(char *data) {
+  if(Serial)
     Serial.printf("%d - %s.\n", millis(), data);
 }
 
@@ -278,6 +286,7 @@ int configureSD(){
     // non-zero -> error
     // Initialize SD card
     if(!SD.begin(21)){
+      if(Serial)
         Serial.println("Card Mount Failed");
         return 1;
     }
@@ -285,19 +294,22 @@ int configureSD(){
 
     // Determine if the type of SD card is available
     if(cardType == CARD_NONE){
+      if(Serial)
         Serial.println("No SD card attached");
         return 2;
     }
 
-    Serial.print("SD Card Type: ");
-    if(cardType == CARD_MMC){
-        Serial.println("MMC");
-    } else if(cardType == CARD_SD){
-        Serial.println("SDSC");
-    } else if(cardType == CARD_SDHC){
-        Serial.println("SDHC");
-    } else {
-        Serial.println("UNKNOWN");
+    if(Serial){
+      Serial.print("SD Card Type: ");
+      if(cardType == CARD_MMC){
+          Serial.println("MMC");
+      } else if(cardType == CARD_SD){
+          Serial.println("SDSC");
+      } else if(cardType == CARD_SDHC){
+          Serial.println("SDHC");
+      } else {
+          Serial.println("UNKNOWN");
+      }
     }
 
     sd_sign = true; // sd initialization check passes
@@ -337,7 +349,8 @@ int initCamera() {
   // camera initialize, will need to remove some of these things for the robot itself
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
-    Serial.printf("Camera init failed with error 0x%x", err);
+    if(Serial)
+      Serial.printf("Camera init failed with error 0x%x", err);
     return err;
   }
   return 0;
@@ -347,7 +360,7 @@ void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
 
   Serial.begin(115200);
-  while(!Serial); // When the serial monitor is turned on, the program starts to execute
+  while(!Serial && millis() < 5000); // When the serial monitor is turned on, the program starts to execute.  Or after 5 seconds for autonomous mode
 
   if(initCamera()) return;
   if(configureSD()) return;
@@ -358,13 +371,14 @@ void setup() {
   }
 }
 
-// we have 80ms (12.5 fps) between camera frames to compute and act on the information
+// we have 80ms (12.5 fps) between camera frames to compute and act on the information before losing future frame time
 
 void loop(){
   // setting up a pointer to the frame buffer
   camera_fb_t * fb = NULL;
   
-  Serial.printf("\n\n\t\tCYCLE START\t %d\n", millis());
+  if(Serial)
+      Serial.printf("\n\n\t\tCYCLE START\t %d\n", millis());
   // Take Picture with camera and put in buffer
   fb = esp_camera_fb_get();
 
@@ -396,14 +410,17 @@ void loop(){
     computeUV();
     
     // Uncomment for testing, comment out for high speed performance without SD card
-    photo_save();
+    if(USE_SD_CARD){
+        photo_save();
+    }
 
     t = (t+1)%2;
   }
 
 
 
-  if(centerSum >= leftSum && centerSum >= rightSum){
+  if(Serial)
+    if(centerSum >= leftSum && centerSum >= rightSum){
     Serial.println("both motors on");
     }
   if(centerSum <= leftSum && leftSum >= rightSum){
