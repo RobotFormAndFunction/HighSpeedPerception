@@ -14,7 +14,7 @@ using namespace BLA;
 #define CAMERA_MODEL_XIAO_ESP32S3 // Has PSRAM
 #include "camera_pins.h"
 
-#define USE_SD_CARD 1    // set to 1 (true) for saving images
+#define USE_SD_CARD 0    // set to 1 (true) for saving images
 
 bool sd_sign = false;              // Check sd status
 
@@ -275,10 +275,28 @@ void computeUV(){
     }
 
     timeLog("Completed UV Segment");
+    int net_U = 0;// net motion
+    int cl = 0;   // count of left-sided points
+    int cr = 0;   // count of right-sided points
+    int ul = 0;   // measure of shift left
+    int ur = 0;   // measure of shift right
+
     // Serial.printf("X,Y,U,V tuples: ");
-    // for(uint8_t i = 0; i < currentFrameCorners; i++) {
-        // Serial.printf("(%d,%d, %d,%d)  ",corr_X[i], corr_Y[i], corr_U[i], corr_V[i]);
-    // }
+    for(uint8_t i = 0; i < currentFrameCorners; i++) {
+      int8_t cu = corr_U[i];
+      if (cu > 0) { // R
+          cr++;
+          ur+=cu;
+      }
+      if (cu < 0) { // L
+          cl++;
+          ul+=cu;
+      }
+      net_U += cu;
+    }
+    Serial.printf("Count moving left: %d. Total motion left: %d.\n", cl, ul);
+    Serial.printf("Count moving right: %d. Total motion right: %d.\n", cr, ur);
+    Serial.printf("Net count(L-R): %d. Net motion (L-R): %d.\n", cl-cr, net_U);
 }
 
 int configureSD(){
