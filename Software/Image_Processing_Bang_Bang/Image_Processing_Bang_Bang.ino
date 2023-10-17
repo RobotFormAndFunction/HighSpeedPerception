@@ -145,7 +145,7 @@ uint8_t * get_eigenvals(int M[2][2]) {
 
 SparseMatrix<IMAGE_HEIGHT, IMAGE_WIDTH, uint8_t, MAX_PIX_CORR> corners_map;
 Matrix      <IMAGE_HEIGHT, IMAGE_WIDTH, uint8_t> corners;
-void cornerDetect(bool t) {
+void cornerDetect(int t) {
     perfTimeLog("Beginning corner detection");
     // t: the starting frame
     // Computes the pixels in the image that have high dx and dy gradients, making them likely corners
@@ -156,15 +156,14 @@ void cornerDetect(bool t) {
     for (int row = 0; row < IMAGE_HEIGHT - corner_sl; row++) {
         for (int col = 0; col < IMAGE_WIDTH - corner_sl; col++) {
             int M[2][2];
-            M.Fill(0);
 
             for (int y = row; y < row + corner_sl; y++) {
                 for (int x = col; x < col + corner_sl; x++) {
                     uint8_t *grad = partialD(x, y, t);  // I_x, I_y, I_t
-                    M(0,0) += grad[0] * grad[0];              // I_x ^2
-                    M(0,1) += grad[0] * grad[1];              // I_x * I_y
-                    M(1,0) += grad[1] * grad[0];              // I_x * I_y
-                    M(1,1) += grad[1] * grad[1];              // I_y ^2
+                    M[0][0] += grad[0] * grad[0];              // I_x ^2
+                    M[0][1] += grad[0] * grad[1];              // I_x * I_y
+                    M[1][0] += grad[1] * grad[0];              // I_x * I_y
+                    M[1][1] += grad[1] * grad[1];              // I_y ^2
                 }
             }
 
