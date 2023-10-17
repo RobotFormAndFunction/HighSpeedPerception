@@ -14,8 +14,8 @@ using namespace BLA;
 #define CAMERA_MODEL_XIAO_ESP32S3 // Has PSRAM
 #include "camera_pins.h"
 
-#define USE_SD_CARD 1    // set to 1 (true) for saving images
-#define perfTimeLog_en 1 // set to 1 (true) to enable more detailed logging of system state/timing
+#define USE_SD_CARD 0    // set to 1 (true) for saving images
+#define perfTimeLog_en 0 // set to 1 (true) to enable more detailed logging of system state/timing
 
 bool sd_sign = false;              // Check sd status
 
@@ -312,6 +312,7 @@ void computeUV(){
     if(!cl) cl++;
     if(!cr) cr++;
 
+    Serial.printf("t: %d\t", times[t]);
     Serial.printf("Count L: %d.\tSum L: %d.\t", cl, ul);
     Serial.printf("Count R: %d.\tSum R: %d.\t", cr, ur);
     Serial.printf("Count(L-R): %d.\tNet Sum (L-R): %d.\n", cl-cr, net_U);
