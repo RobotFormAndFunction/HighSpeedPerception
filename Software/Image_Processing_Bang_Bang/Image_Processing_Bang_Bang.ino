@@ -14,15 +14,19 @@ using namespace BLA;
 #define CAMERA_MODEL_XIAO_ESP32S3 // Has PSRAM
 #include "camera_pins.h"
 
-#define USE_SD_CARD 0    // set to 1 (true) for saving images
+#define USE_SD_CARD 1    // set to 1 (true) for saving images
+#define perfTimeLog_en 1 // set to 1 (true) to enable more detailed logging of system state/timing
 
 bool sd_sign = false;              // Check sd status
 
-const int IMAGE_WIDTH = 96; // set the camera properties to this size in the configure file
+const int IMAGE_WIDTH = 96;  // set the camera properties to this size in the configure file
 const int IMAGE_HEIGHT = 96; // set the camera properties to this size
+const int TIME_FRAMES = 2;   // how many frames back in time to keep
 
 // two instances of Two-dimensional array to hold the pixel values at consecutive time points
-BLA::Matrix<IMAGE_HEIGHT, IMAGE_WIDTH,uint8_t> frames[2];
+uint8_t frames[TIME_FRAMES][IMAGE_HEIGHT][IMAGE_WIDTH];
+int times[TIME_FRAMES];  // tracks the age of the frames in the frames array
+
 bool t = 0;   // timestep of latest image to go into buffer
 #define THRESHOLD 255/150 //integer threshold for corner pixel - at least a 50 out of 255, but inverted for faster compute
 // BLA::Matrix<IMAGE_HEIGHT, IMAGE_WIDTH,uint8_t> UVimage2D[2];  // 3D array tracking the U and V values for each pixel of incoming frames
@@ -58,25 +62,28 @@ void photo_save() {
     char filename[32];
     char fileU[32];
     char fileV[32];
-    int time = millis();
+    int time = times[t];
     sprintf(filename, "/image%d.bytes", time);
     sprintf(fileU, "/image%d.U", time);
     sprintf(fileV, "/image%d.V", time);
-    timeLog("File write starting");
+    perfTimeLog("File write starting");
     if(Serial)
         Serial.printf("Beginning of writing image %s\n", filename);
     File file = SD.open(filename, FILE_WRITE);
     
+
     for (int row = 0; row < IMAGE_HEIGHT; row++) {
-      for (int col = 0; col < IMAGE_WIDTH; col++) {
-        file.write(frames[t](row,col));
-      }
+      uint8_t *frame_pointer = frames[t][row];
+      file.write(frame_pointer, IMAGE_WIDTH);
+    //   for (int col = 0; col < IMAGE_WIDTH; col++) {
+    //     file.write(frames[t][row][col]);
+    //   }
     }
 
-    timeLog("Image written");
+    perfTimeLog("Image written");
     file.close();
 
-    timeLog("Beginning of writing UV images");
+    perfTimeLog("Beginning of writing UV images");
     File file_U = SD.open(fileU, FILE_WRITE);
     File file_V = SD.open(fileV, FILE_WRITE);
     int corr_i = 0;
@@ -95,7 +102,7 @@ void photo_save() {
         }
     }
 
-    timeLog("U-V Images written with correspondence count:");
+    perfTimeLog("U-V Images written with correspondence count:");
     if(Serial)
       Serial.printf("              %d.\n", corr_i);
     file_U.close();
@@ -110,25 +117,25 @@ uint8_t * partialD(uint8_t x, uint8_t y, bool t) {
   not divided by 4 as it should be to avoid loss of information with integer-type data storage
   */
   bool n = (1+t)%2;  
-  deltas[0] /*x*/ = (frames[t](y,x+1) + frames[t](y+1,x+1) + frames[n](y,x+1) + frames[n](y+1,x+1)) - 
-                    (frames[t](y,x)   + frames[t](y+1,x  ) + frames[n](y,x  ) + frames[n](y+1,x  ));
-  deltas[1] /*y*/ = (frames[t](y+1,x) + frames[t](y+1,x+1) + frames[n](y+1,x) + frames[n](y+1,x+1)) - 
-                    (frames[t](y,x)   + frames[t](y  ,x  ) + frames[n](y,  x) + frames[n](y+1,x  ));
-  deltas[2] /*t*/ = (frames[n](y,x)   + frames[n](y+1,x  ) + frames[n](y,x+1) + frames[n](y+1,x+1)) - 
-                    (frames[t](y,x)   + frames[t](y+1,x  ) + frames[t](y,x+1) + frames[t](y+1,x+1));
+  deltas[0] /*x*/ = (frames[t][y][x+1] + frames[t][y+1][x+1] + frames[n][y][x+1] + frames[n][y+1][x+1]) - 
+                    (frames[t][y][x  ] + frames[t][y+1][x  ] + frames[n][y][x  ] + frames[n][y+1][x  ]);
+  deltas[1] /*y*/ = (frames[t][y+1][x] + frames[t][y+1][x+1] + frames[n][y+1][x] + frames[n][y+1][x+1]) - 
+                    (frames[t][y  ][x] + frames[t][y  ][x  ] + frames[n][y][  x] + frames[n][y+1][x  ]);
+  deltas[2] /*t*/ = (frames[n][y][x]   + frames[n][y+1][x  ] + frames[n][y][x+1] + frames[n][y+1][x+1]) - 
+                    (frames[t][y][x]   + frames[t][y+1][x  ] + frames[t][y][x+1] + frames[t][y+1][x+1]);
 
   return deltas;
 }
 
 uint8_t eigenvals[2]; // tracks eigenvalues of the matrix
-uint8_t * get_eigenvals(Matrix<2,2> M) { 
+uint8_t * get_eigenvals(int M[2][2]) { 
   /** 
   Loads the eigenvalues for a 2x2 symmetric matrix into eigenvals[2].
   This will provide the wrong answer for all other matrices
   */
-    uint8_t a = M(0,0);
-    uint8_t b = M(0,1);
-    uint8_t c = M(1,1);
+    uint8_t a = M[0][0];
+    uint8_t b = M[0][1];
+    uint8_t c = M[1][1];
     uint8_t base = a+c;
     uint8_t radical = (a-c)*(a-c) + (4*b*b);
     eigenvals[0] = (base + sqrt(radical)) / 2;
@@ -139,16 +146,16 @@ uint8_t * get_eigenvals(Matrix<2,2> M) {
 SparseMatrix<IMAGE_HEIGHT, IMAGE_WIDTH, uint8_t, MAX_PIX_CORR> corners_map;
 Matrix      <IMAGE_HEIGHT, IMAGE_WIDTH, uint8_t> corners;
 void cornerDetect(bool t) {
-    timeLog("Beginning corner detection");
+    perfTimeLog("Beginning corner detection");
     // t: the starting frame
     // Computes the pixels in the image that have high dx and dy gradients, making them likely corners
     // uint8_t os = window_size/2; // offset - halved to shift iteration point toward the center of the patch
     corners.Fill(0);
 
-    timeLog("Processing rows...");
+    perfTimeLog("Processing rows...");
     for (int row = 0; row < IMAGE_HEIGHT - corner_sl; row++) {
         for (int col = 0; col < IMAGE_WIDTH - corner_sl; col++) {
-            Matrix<2,2> M;
+            int M[2][2];
             M.Fill(0);
 
             for (int y = row; y < row + corner_sl; y++) {
@@ -171,7 +178,7 @@ void cornerDetect(bool t) {
         }
     }
 
-    timeLog("Computed corner eigenvalues");
+    perfTimeLog("Computed corner eigenvalues");
 
     // Generate the bit mask for pixels that are corners
     // find the maximum of the matrix
@@ -182,7 +189,7 @@ void cornerDetect(bool t) {
         }
     }
 
-    timeLog("Computed maximum corner value");
+    perfTimeLog("Computed maximum corner value");
 
     // assume anything that is 20%+ of the maximum is a corner
     uint8_t ent = 0;
@@ -211,11 +218,18 @@ void cornerDetect(bool t) {
     if(ent < MAX_PIX_CORR) {
         corr_en[ent]=0; // disable the next element in the array to truncate the list for this frame
     }
-    timeLog("Completed mask generation of corners_map");
-    if(Serial)
-      Serial.printf("               with %d corners.\n", ent);
+    perfTimeLog("Completed mask generation of corners_map");
+    // if(Serial)
+      // Serial.printf("               with %d corners.\n", ent);
     currentFrameCorners = ent;
 
+}
+
+// Wrapper to disable all performance time logs from one point
+void perfTimeLog(char *data){
+  if(perfTimeLog_en){
+    timeLog(data);
+  }
 }
 
 void timeLog(char *data) {
@@ -233,7 +247,7 @@ int ssd (bool t0, bool t1, int x0, int y0, int x1, int y1){
   int diff = 0;
   for(int i = 0; i < SSD_MATCH_WINDOW; i+=SSD_STEP_SIZE){
     for(int j = 0; j < SSD_MATCH_WINDOW; j+=SSD_STEP_SIZE){
-      int d = frames[t0](y0+i,x0+j) - frames[t1](y1+i,x1+j); // compute difference between each 2 corresponding pixels in the patch
+      int d = frames[t0][y0+i][x0+j] - frames[t1][y1+i][x1+j]; // compute difference between each 2 corresponding pixels in the patch
       diff += d*d; // square that and add it to the sum to get SSD
     }
   }
@@ -242,10 +256,10 @@ int ssd (bool t0, bool t1, int x0, int y0, int x1, int y1){
 }
 
 void computeUV(){
-    timeLog("Beginning UV Computation");
+    perfTimeLog("Beginning UV Computation");
     corr_en[0] = 0;  // "clear" all corners by setting the first one as disabled // corners_map.Fill(0);    // clearCorners();
     cornerDetect(t);
-    timeLog("Completed Corner Detection");
+    perfTimeLog("Completed Corner Detection");
     // From the image data buffer, extract the U and V values at corners using SSD
     // iterator over sparse matrix elements based on: https://github.com/tomstewart89/BasicLinearAlgebra/blob/94f2bdf8c245cefc66842a7386940a045e7ef29f/test/test_linear_algebra.cpp#L159
     for(uint8_t i = 0; i < currentFrameCorners; i++) {
@@ -274,7 +288,7 @@ void computeUV(){
         // Serial.printf("\nAdded corner: (%d,%d)\td:(%d,%d),\ti:%d\n", x,y, corr_U[i], corr_V[i], i);
     }
 
-    timeLog("Completed UV Segment");
+    perfTimeLog("Completed UV Segment");
     int net_U = 0;// net motion
     int cl = 0;   // count of left-sided points
     int cr = 0;   // count of right-sided points
@@ -290,13 +304,18 @@ void computeUV(){
       }
       if (cu < 0) { // L
           cl++;
-          ul+=cu;
+          ul-=cu;
       }
       net_U += cu;
     }
-    Serial.printf("Count moving left: %d. Total motion left: %d.\n", cl, ul);
-    Serial.printf("Count moving right: %d. Total motion right: %d.\n", cr, ur);
-    Serial.printf("Net count(L-R): %d. Net motion (L-R): %d.\n", cl-cr, net_U);
+
+    // avoid division by 0
+    if(!cl) cl++;
+    if(!cr) cr++;
+
+    Serial.printf("Count L: %d.\tSum L: %d.\t", cl, ul);
+    Serial.printf("Count R: %d.\tSum R: %d.\t", cr, ur);
+    Serial.printf("Count(L-R): %d.\tNet Sum (L-R): %d.\n", cl-cr, net_U);
 }
 
 int configureSD(){
@@ -396,7 +415,7 @@ void loop(){
   camera_fb_t * fb = NULL;
   
   if(Serial)
-      Serial.printf("\n\n\t\tCYCLE START\t %d\n", millis());
+      // Serial.printf("\n\n\t\tCYCLE START\t %d\n", millis());
   // Take Picture with camera and put in buffer
   fb = esp_camera_fb_get();
 
@@ -411,16 +430,17 @@ void loop(){
 
 
   if (fb) {
-    timeLog("Frame buffer verified");
+    perfTimeLog("Frame buffer verified");
     // Serial.printf("Camera buffer length: %d\n", fb->len);
 
     // Transfer pixel data from the image buffer to the 2D array
     for (int row = 0; row < IMAGE_HEIGHT; row++) {
       for (int col = 0; col < IMAGE_WIDTH; col++) {
         int index = (row * IMAGE_WIDTH) + col; // Calculate the index in the 1D buffer
-        frames[t](row, col) = fb->buf[index];    // Copy the pixel value to the 2D array and put a 1 if above threshold, otherwise 0
+        frames[t][row][col] = fb->buf[index];    // Copy the pixel value to the 2D array and put a 1 if above threshold, otherwise 0
       }
     }
+    times[t] = millis();
     // Release the image buffer
     esp_camera_fb_return(fb);
 
@@ -437,16 +457,16 @@ void loop(){
 
 
 
-  if(Serial)
-    if(centerSum >= leftSum && centerSum >= rightSum){
-    Serial.println("both motors on");
-    }
-  if(centerSum <= leftSum && leftSum >= rightSum){
-    Serial.println("left motor on");
-    }
-  if(rightSum >= leftSum && leftSum <= rightSum){
-    Serial.println("right motor on");
-    }
-  else {Serial.println("both motors on");}
+  // if(Serial)
+  //   if(centerSum >= leftSum && centerSum >= rightSum){
+  //   Serial.println("both motors on");
+  //   }
+  // if(centerSum <= leftSum && leftSum >= rightSum){
+  //   Serial.println("left motor on");
+  //   }
+  // if(rightSum >= leftSum && leftSum <= rightSum){
+  //   Serial.println("right motor on");
+  //   }
+  // else {Serial.println("both motors on");}
 
 }
